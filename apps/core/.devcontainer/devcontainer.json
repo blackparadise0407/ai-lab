@@ -7,10 +7,10 @@
     "customizations": {
         "vscode": {
             "extensions": [
-                "ms-python.python", // Python support
-                "ms-python.vscode-pylance", // Intellisense
-                "njpwerner.autodocstring", // Docstring generator
-                "tamasfe.even-better-toml" // TOML support
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "njpwerner.autodocstring",
+                "tamasfe.even-better-toml"
             ],
             "settings": {
                 "python.defaultInterpreterPath": "/usr/local/bin/python",

@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
 core.db
+uploads/
+*.py[cod]
+*.sqlite3
+*.db
+.env
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+uploads/
