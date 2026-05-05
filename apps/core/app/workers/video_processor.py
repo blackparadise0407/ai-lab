@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import re
@@ -24,6 +25,7 @@ SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
 
 WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
+logger = logging.getLogger(__name__)
 
 
 class PipelineError(RuntimeError):
@@ -63,7 +65,7 @@ class VideoProcessingWorker:
         try:
             self._process_job_impl(job_id)
         except Exception as exc:  # noqa: BLE001
-            print(str(exc))
+            logger.exception("Video processing failed for job_id=%s", job_id)
             self._mark_job_failed(job_id, "pipeline_error", str(exc))
 
     def _process_job_impl(self, job_id: int) -> None:
@@ -327,15 +329,43 @@ class VideoProcessingWorker:
         return "\n".join(text_chunks).strip()
 
     def _compile_ssml(self, translated_srt: str) -> str:
-        texts = []
-        for line in translated_srt.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.isdigit() or "-->" in stripped:
-                continue
-            texts.append(self._escape_ssml(stripped))
+        blocks = self._parse_srt_blocks(translated_srt)
+        if not blocks:
+            return "No text"
 
-        body = "<break time=\"500ms\"/>".join(texts) if texts else "No text"
-        return f"<speak>{body}</speak>"
+        parts: list[str] = []
+        parsed_timings: list[tuple[float, float]] = [self._parse_srt_timing_range(timing) for _seq, timing, _text in blocks]
+
+        for idx, (_sequence, _timing, text) in enumerate(blocks):
+            escaped_text = self._escape_ssml(text)
+            if escaped_text:
+                parts.append(escaped_text)
+
+            if idx >= len(parsed_timings) - 1:
+                continue
+
+            current_end = parsed_timings[idx][1]
+            next_start = parsed_timings[idx + 1][0]
+            pause_seconds = max(0.0, next_start - current_end)
+            if pause_seconds > 0:
+                parts.append(f"<break time=\"{pause_seconds:.3f}s\"/>")
+
+        return "".join(parts).strip() or "No text"
+
+    def _parse_srt_timing_range(self, timing: str) -> tuple[float, float]:
+        start_raw, end_raw = [part.strip() for part in timing.split("-->", maxsplit=1)]
+        return self._parse_srt_time(start_raw), self._parse_srt_time(end_raw)
+
+    def _parse_srt_time(self, value: str) -> float:
+        hours_raw, minutes_raw, seconds_raw = value.split(":", maxsplit=2)
+        seconds_part, millis_part = seconds_raw.split(",", maxsplit=1)
+        total_seconds = (
+            int(hours_raw) * 3600
+            + int(minutes_raw) * 60
+            + int(seconds_part)
+            + int(millis_part) / 1000.0
+        )
+        return total_seconds
 
     def _submit_dub_request(self, job_id: int, ssml: str, job_work_dir: Path) -> tuple[Path, str]:
         provider_url = os.getenv("DUB_PROVIDER_URL")
