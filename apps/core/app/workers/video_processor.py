@@ -398,6 +398,8 @@ class VideoProcessingWorker:
             rounded_pause_seconds = round(pause_seconds, 3)
             if rounded_pause_seconds >= 0.001:
                 parts.append(f"<break time=\"{rounded_pause_seconds:.3f}s\"/>")
+            else:
+                parts.append(" ")
 
         return "".join(parts).strip() or "No text"
 
