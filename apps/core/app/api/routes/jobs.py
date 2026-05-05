@@ -14,7 +14,13 @@ UPLOADS_DIR = Path("uploads/source_videos")
 SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
 
 
-@router.post("", response_model=JobResponse, status_code=201)
+@router.post(
+    "",
+    response_model=JobResponse,
+    status_code=201,
+    summary="Create a dubbing job",
+    description="Creates a new job and returns its tracking metadata.",
+)
 def create_job(payload: JobCreateRequest, session: Session = Depends(get_session)):
     job = Job(
         external_job_id=f"job_{uuid4().hex[:12]}",
@@ -27,10 +33,15 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
     return job
 
 
-@router.post("/{job_id}/video", response_model=JobResponse)
+@router.post(
+    "/{job_id}/video",
+    response_model=JobResponse,
+    summary="Upload source video",
+    description="Uploads a source video file for a job and marks the job as uploaded.",
+)
 async def upload_source_video(
     job_id: int,
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Video file (e.g. .mp4, .mov)"),
     session: Session = Depends(get_session),
 ):
     job = session.exec(select(Job).where(Job.id == job_id)).first()
@@ -78,7 +89,12 @@ async def upload_source_video(
     return job
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get(
+    "/{job_id}",
+    response_model=JobResponse,
+    summary="Get job details",
+    description="Returns the current status and metadata for a job.",
+)
 def get_job(job_id: int, session: Session = Depends(get_session)):
     job = session.exec(select(Job).where(Job.id == job_id)).first()
     if not job:
