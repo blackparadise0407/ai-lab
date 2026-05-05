@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 from app.db.database import get_session
 from app.models.entities import Artifact, Job, JobStatus
 from app.schemas.jobs import JobCreateRequest, JobResponse
+from app.workers.video_processor import video_processing_worker
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -30,6 +31,7 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
     session.add(job)
     session.commit()
     session.refresh(job)
+
     return job
 
 
@@ -86,6 +88,8 @@ async def upload_source_video(
     session.add(job)
     session.commit()
     session.refresh(job)
+
+    video_processing_worker.enqueue(job_id=job.id)
     return job
 
 

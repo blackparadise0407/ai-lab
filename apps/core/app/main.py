@@ -4,12 +4,15 @@ from fastapi.responses import RedirectResponse
 
 from app.api.routes import artifacts_router, jobs_router, provider_requests_router
 from app.db.database import init_db
+from app.workers.video_processor import video_processing_worker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    video_processing_worker.start()
     yield
+    video_processing_worker.stop()
 
 
 app = FastAPI(
