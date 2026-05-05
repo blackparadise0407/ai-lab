@@ -277,8 +277,6 @@ class VideoProcessingWorker:
                 response_data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise PipelineError(f"OpenAI translation request failed: {exc}") from exc
-        
-        print(response_data)
 
         translated_raw = response_data.get("output_text", "").strip()
         if not translated_raw:
