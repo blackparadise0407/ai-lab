@@ -70,6 +70,7 @@ class VideoProcessingWorker:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
                 return
+            target_language = job.target_language
 
             source_artifact = session.exec(
                 select(Artifact).where(
@@ -110,7 +111,7 @@ class VideoProcessingWorker:
                 return
             self._update_job_progress(session, job, "translating", 45)
 
-        translated_srt_text = self._translate_srt(srt_source_text)
+        translated_srt_text = self._translate_srt(srt_source_text, target_language)
         translated_srt_path = job_work_dir / "translated.srt"
         translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
 
@@ -189,7 +190,7 @@ class VideoProcessingWorker:
             raise PipelineError("Whisper returned no transcription segments")
         return "\n\n".join(srt_blocks) + "\n"
 
-    def _translate_srt(self, srt_text: str) -> str:
+    def _translate_srt(self, srt_text: str, target_language: str) -> str:
         openai_api_key = os.getenv("OPENAI_API_KEY")
         if not openai_api_key:
             return srt_text

@@ -16,7 +16,6 @@ Create `apps/core/.env` for local testing. `app.main` loads this automatically a
 ```bash
 OPENAI_API_KEY=sk-...
 OPENAI_TRANSLATION_MODEL=gpt-4.1-mini
-TARGET_LANGUAGE=English
 
 # Optional pipeline settings
 WHISPER_MODEL=small
@@ -25,3 +24,5 @@ DUB_PROVIDER_URL=
 ```
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
+
+`target_language` is taken from the job record (`Job.target_language`) instead of environment configuration.
