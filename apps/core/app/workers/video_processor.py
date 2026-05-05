@@ -251,9 +251,18 @@ class VideoProcessingWorker:
                         {
                             "type": "input_text",
                             "text": (
-                                "You are a professional subtitle translator. Translate each line to "
-                                f"{target_language}. Preserve meaning and tone. Return ONLY a JSON array "
-                                "of translated strings with identical item count and ordering."
+                                "You are a professional subtitle translator and dubbing editor. "
+                                f"Translate every string in the input JSON array into {target_language}. "
+                                "Rules you MUST follow, in priority order:\n"
+                                "1. Return ONLY a JSON array of strings — no markdown, no extra keys, no prose.\n"
+                                "2. The output array MUST contain exactly the same number of elements as the input array.\n"
+                                "3. Element at index N in the output is the translation of element at index N in the input — never merge, split, reorder, or omit elements.\n"
+                                "4. DURATION MATCHING (highest priority): Each translated string must have approximately the same spoken duration as its source string. "
+                                "Prefer shorter synonyms, contractions, or natural ellipsis over word-for-word accuracy when necessary to match length. "
+                                "Aim for the syllable count to be within ±15% of the original.\n"
+                                "5. NATURALNESS: Within the duration constraint, use fluent, idiomatic phrasing native to the target language — avoid literal word-for-word translation that sounds unnatural.\n"
+                                "6. Preserve the original meaning and emotional tone as closely as possible given constraints 4 and 5.\n"
+                                "7. If a line cannot be translated (e.g. it is already in the target language), copy it verbatim."
                             ),
                         }
                     ],
