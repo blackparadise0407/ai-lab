@@ -1,18 +1,33 @@
 from __future__ import annotations
 
+import json
+import os
 import queue
+import re
+import subprocess
 import threading
-import time
-from datetime import datetime, UTC
+import urllib.error
+import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import Session, select
+from faster_whisper import WhisperModel
 
 from app.db.database import engine
-from app.models.entities import Artifact, Job, JobStatus
+from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
 
 PROCESSED_ARTIFACT_TYPE = "dubbed_video"
+SRT_ARTIFACT_TYPE = "subtitle_srt"
+TTS_AUDIO_ARTIFACT_TYPE = "tts_audio"
+SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
+
+WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
+
+
+class PipelineError(RuntimeError):
+    """Raised when a pipeline step fails with a user-visible error."""
 
 
 class VideoProcessingWorker:
@@ -45,67 +60,290 @@ class VideoProcessingWorker:
                 self._queue.task_done()
 
     def _process_job(self, job_id: int) -> None:
+        try:
+            self._process_job_impl(job_id)
+        except Exception as exc:  # noqa: BLE001
+            self._mark_job_failed(job_id, "pipeline_error", str(exc))
+
+    def _process_job_impl(self, job_id: int) -> None:
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
                 return
 
-            job.status = JobStatus.PROCESSING
-            job.current_step = "transcribing"
-            job.progress_percent = max(job.progress_percent, 20)
-            job.updated_at = datetime.now(UTC)
-            session.add(job)
-            session.commit()
-
-        time.sleep(1)
-
-        with Session(engine) as session:
-            job = session.exec(select(Job).where(Job.id == job_id)).first()
-            if not job:
-                return
-            job.status = JobStatus.FINALIZING
-            job.current_step = "muxing"
-            job.progress_percent = max(job.progress_percent, 80)
-            job.updated_at = datetime.now(UTC)
-            session.add(job)
-            session.commit()
-
-        time.sleep(1)
-
-        with Session(engine) as session:
-            job = session.exec(select(Job).where(Job.id == job_id)).first()
-            if not job:
-                return
-
-            PROCESSED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
-            output_path.write_bytes(b"mock dubbed output")
-
-            artifact = session.exec(
+            source_artifact = session.exec(
                 select(Artifact).where(
                     Artifact.job_id == job_id,
-                    Artifact.artifact_type == PROCESSED_ARTIFACT_TYPE,
+                    Artifact.artifact_type == SOURCE_VIDEO_ARTIFACT_TYPE,
                 )
             ).first()
+            if not source_artifact:
+                raise PipelineError("Missing source_video artifact")
 
-            if artifact:
-                artifact.storage_url = str(output_path)
-                artifact.content_type = "video/mp4"
-            else:
-                artifact = Artifact(
-                    job_id=job_id,
-                    artifact_type=PROCESSED_ARTIFACT_TYPE,
-                    storage_url=str(output_path),
-                    content_type="video/mp4",
-                )
-                session.add(artifact)
+            source_video_path = Path(source_artifact.storage_url)
+            if not source_video_path.exists():
+                raise PipelineError("Source video file not found")
+
+            self._update_job_progress(session, job, "extracting_audio", 10)
+
+        WORK_DIR.mkdir(parents=True, exist_ok=True)
+        PROCESSED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        job_work_dir = WORK_DIR / f"job_{job_id}"
+        job_work_dir.mkdir(parents=True, exist_ok=True)
+
+        source_audio_path = job_work_dir / "source.wav"
+        self._extract_audio(source_video_path, source_audio_path)
+
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            self._update_job_progress(session, job, "transcribing", 30)
+
+        srt_source_text = self._transcribe_to_srt(source_audio_path)
+        srt_source_path = job_work_dir / "source.srt"
+        srt_source_path.write_text(srt_source_text, encoding="utf-8")
+
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            self._update_job_progress(session, job, "translating", 45)
+
+        translated_srt_text = self._translate_srt(srt_source_text)
+        translated_srt_path = job_work_dir / "translated.srt"
+        translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
+
+        ssml_text = self._compile_ssml(translated_srt_text)
+        ssml_path = job_work_dir / "dub.ssml"
+        ssml_path.write_text(ssml_text, encoding="utf-8")
+
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            self._update_job_progress(session, job, "waiting_provider", 65, status=JobStatus.WAITING_PROVIDER)
+
+        tts_audio_path, provider_request_id = self._submit_dub_request(job_id, ssml_text, job_work_dir)
+
+        with Session(engine) as session:
+            self._upsert_provider_request(session, job_id, provider_request_id)
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            self._update_job_progress(session, job, "muxing", 85, status=JobStatus.FINALIZING)
+
+        output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
+        self._mux_audio(source_video_path, tts_audio_path, output_path)
+
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+
+            self._upsert_artifact(session, job_id, PROCESSED_ARTIFACT_TYPE, output_path, "video/mp4")
+            self._upsert_artifact(session, job_id, SRT_ARTIFACT_TYPE, translated_srt_path, "application/x-subrip")
+            self._upsert_artifact(session, job_id, TTS_AUDIO_ARTIFACT_TYPE, tts_audio_path, "audio/wav")
 
             job.status = JobStatus.COMPLETED
             job.current_step = "done"
             job.progress_percent = 100
             job.updated_at = datetime.now(UTC)
+            job.error_code = None
+            job.error_message = None
             session.add(job)
             session.commit()
+
+    def _extract_audio(self, source_video: Path, output_audio: Path) -> None:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(source_video),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(output_audio),
+        ]
+        self._run_cmd(cmd, "audio extraction failed")
+
+    def _transcribe_to_srt(self, source_audio: Path) -> str:
+        model_name = os.getenv("WHISPER_MODEL", "small")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+        model = WhisperModel(model_name, compute_type=compute_type)
+        segments, _ = model.transcribe(str(source_audio), vad_filter=True)
+        srt_blocks: list[str] = []
+        for idx, segment in enumerate(segments, start=1):
+            text = segment.text.strip()
+            if not text:
+                continue
+            start_ts = self._seconds_to_srt_time(segment.start)
+            end_ts = self._seconds_to_srt_time(segment.end)
+            srt_blocks.append(f"{idx}\n{start_ts} --> {end_ts}\n{text}")
+
+        if not srt_blocks:
+            raise PipelineError("Whisper returned no transcription segments")
+        return "\n\n".join(srt_blocks) + "\n"
+
+    def _translate_srt(self, srt_text: str) -> str:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            return srt_text
+
+        raise PipelineError("Live GPT translation is not wired yet; unset OPENAI_API_KEY for local mock mode")
+
+    def _compile_ssml(self, translated_srt: str) -> str:
+        texts = []
+        for line in translated_srt.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.isdigit() or "-->" in stripped:
+                continue
+            texts.append(self._escape_ssml(stripped))
+
+        body = "<break time=\"500ms\"/>".join(texts) if texts else "No text"
+        return f"<speak>{body}</speak>"
+
+    def _submit_dub_request(self, job_id: int, ssml: str, job_work_dir: Path) -> tuple[Path, str]:
+        provider_url = os.getenv("DUB_PROVIDER_URL")
+        output_audio = job_work_dir / "dubbed.wav"
+        if not provider_url:
+            output_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+            return output_audio, f"mock-{job_id}"
+
+        payload = json.dumps({"job_id": job_id, "ssml": ssml}).encode("utf-8")
+        request = urllib.request.Request(
+            provider_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise PipelineError(f"Dub provider request failed: {exc}") from exc
+
+        audio_url = response_data.get("audio_url")
+        provider_request_id = response_data.get("request_id", f"provider-{job_id}")
+        if not audio_url:
+            raise PipelineError("Dub provider did not return audio_url")
+
+        self._download_file(audio_url, output_audio)
+        return output_audio, str(provider_request_id)
+
+    def _mux_audio(self, source_video: Path, dubbed_audio: Path, output_video: Path) -> None:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(source_video),
+            "-i",
+            str(dubbed_audio),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(output_video),
+        ]
+        self._run_cmd(cmd, "audio/video muxing failed")
+
+    def _run_cmd(self, cmd: list[str], error_message: str) -> None:
+        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if process.returncode != 0:
+            details = process.stderr.strip() or process.stdout.strip()
+            raise PipelineError(f"{error_message}: {details}")
+
+    def _download_file(self, url: str, output_path: Path) -> None:
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
+                output_path.write_bytes(response.read())
+        except urllib.error.URLError as exc:
+            raise PipelineError(f"Failed to download dubbed audio: {exc}") from exc
+
+    def _upsert_provider_request(self, session: Session, job_id: int, provider_request_id: str) -> None:
+        provider_request = session.exec(
+            select(ProviderRequest).where(ProviderRequest.provider_request_id == provider_request_id)
+        ).first()
+        if provider_request:
+            provider_request.status = ProviderRequestStatus.SUCCEEDED
+            provider_request.callback_received = True
+            provider_request.updated_at = datetime.now(UTC)
+        else:
+            provider_request = ProviderRequest(
+                job_id=job_id,
+                provider_name="dub_provider",
+                provider_request_id=provider_request_id,
+                status=ProviderRequestStatus.SUCCEEDED,
+                callback_received=True,
+            )
+            session.add(provider_request)
+        session.commit()
+
+    def _upsert_artifact(self, session: Session, job_id: int, artifact_type: str, path: Path, content_type: str) -> None:
+        artifact = session.exec(
+            select(Artifact).where(Artifact.job_id == job_id, Artifact.artifact_type == artifact_type)
+        ).first()
+        if artifact:
+            artifact.storage_url = str(path)
+            artifact.content_type = content_type
+        else:
+            session.add(
+                Artifact(
+                    job_id=job_id,
+                    artifact_type=artifact_type,
+                    storage_url=str(path),
+                    content_type=content_type,
+                )
+            )
+
+    def _update_job_progress(
+        self,
+        session: Session,
+        job: Job,
+        step: str,
+        progress: int,
+        *,
+        status: JobStatus = JobStatus.PROCESSING,
+    ) -> None:
+        job.status = status
+        job.current_step = step
+        job.progress_percent = max(job.progress_percent, progress)
+        job.updated_at = datetime.now(UTC)
+        session.add(job)
+        session.commit()
+
+    def _mark_job_failed(self, job_id: int, error_code: str, error_message: str) -> None:
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            job.status = JobStatus.FAILED
+            job.current_step = "failed"
+            job.error_code = error_code
+            job.error_message = error_message[:1024]
+            job.updated_at = datetime.now(UTC)
+            session.add(job)
+            session.commit()
+
+    def _escape_ssml(self, text: str) -> str:
+        return re.sub(r"[<>&\"]", lambda m: {"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"}[m.group(0)], text)
+
+    def _seconds_to_srt_time(self, seconds: float) -> str:
+        safe_seconds = max(0.0, float(seconds))
+        millis_total = int(round(safe_seconds * 1000))
+        hours, remainder = divmod(millis_total, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        secs, millis = divmod(remainder, 1_000)
+        return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
 video_processing_worker = VideoProcessingWorker()
