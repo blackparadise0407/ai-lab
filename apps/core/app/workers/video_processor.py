@@ -284,18 +284,61 @@ class VideoProcessingWorker:
         if not translated_raw:
             raise PipelineError("OpenAI translation returned empty output_text")
 
-        try:
-            translated = json.loads(translated_raw)
-        except json.JSONDecodeError as exc:
-            raise PipelineError("OpenAI translation output was not valid JSON") from exc
-
-        if not isinstance(translated, list) or len(translated) != len(lines):
-            raise PipelineError("OpenAI translation output length mismatch")
+        translated = self._parse_openai_translations(translated_raw, expected_count=len(lines))
+        if translated is None:
+            raise PipelineError("OpenAI translation output was not valid JSON")
 
         normalized = [str(item).strip() for item in translated]
         if any(not item for item in normalized):
             raise PipelineError("OpenAI translation produced empty subtitle lines")
         return normalized
+
+
+    def _parse_openai_translations(self, translated_raw: str, expected_count: int) -> list[str] | None:
+        parsed = self._json_load_list(translated_raw)
+        if parsed is None:
+            parsed = self._json_load_list(self._strip_markdown_code_fences(translated_raw))
+
+        if parsed is None:
+            return None
+
+        if len(parsed) == expected_count:
+            return parsed
+
+        if expected_count == 1:
+            return ["\n".join(str(item).strip() for item in parsed if str(item).strip())]
+
+        return None
+
+    def _json_load_list(self, raw: str) -> list[str] | None:
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(loaded, list):
+            return None
+
+        return [str(item) for item in loaded]
+
+    def _strip_markdown_code_fences(self, value: str) -> str:
+        stripped = value.strip()
+        if not stripped.startswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if len(lines) < 3:
+            return stripped
+
+        first_line = lines[0].strip()
+        last_line = lines[-1].strip()
+        if not last_line.startswith("```"):
+            return stripped
+
+        if first_line in {"```", "```json", "```JSON"}:
+            return "\n".join(lines[1:-1]).strip()
+
+        return stripped
 
     def _extract_openai_output_text(self, response_data: dict) -> str:
         output_text = response_data.get("output_text")
