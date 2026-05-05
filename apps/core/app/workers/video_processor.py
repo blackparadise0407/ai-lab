@@ -333,22 +333,28 @@ class VideoProcessingWorker:
         if not blocks:
             return "No text"
 
+        spoken_blocks: list[tuple[float, float, str]] = []
+        for _sequence, timing, text in blocks:
+            escaped_text = self._escape_ssml(text).strip()
+            if not escaped_text:
+                continue
+            start_time, end_time = self._parse_srt_timing_range(timing)
+            spoken_blocks.append((start_time, end_time, escaped_text))
+
+        if not spoken_blocks:
+            return "No text"
+
         parts: list[str] = []
-        parsed_timings: list[tuple[float, float]] = [self._parse_srt_timing_range(timing) for _seq, timing, _text in blocks]
-
-        for idx, (_sequence, _timing, text) in enumerate(blocks):
-            escaped_text = self._escape_ssml(text)
-            if escaped_text:
-                parts.append(escaped_text)
-
-            if idx >= len(parsed_timings) - 1:
+        for idx, (_start_time, end_time, text) in enumerate(spoken_blocks):
+            parts.append(text)
+            if idx >= len(spoken_blocks) - 1:
                 continue
 
-            current_end = parsed_timings[idx][1]
-            next_start = parsed_timings[idx + 1][0]
-            pause_seconds = max(0.0, next_start - current_end)
-            if pause_seconds > 0:
-                parts.append(f"<break time=\"{pause_seconds:.3f}s\"/>")
+            next_start_time = spoken_blocks[idx + 1][0]
+            pause_seconds = max(0.0, next_start_time - end_time)
+            rounded_pause_seconds = round(pause_seconds, 3)
+            if rounded_pause_seconds >= 0.001:
+                parts.append(f"<break time=\"{rounded_pause_seconds:.3f}s\"/>")
 
         return "".join(parts).strip() or "No text"
 
