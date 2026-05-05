@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -53,7 +53,7 @@ class VideoProcessingWorker:
             job.status = JobStatus.PROCESSING
             job.current_step = "transcribing"
             job.progress_percent = max(job.progress_percent, 20)
-            job.updated_at = datetime.now(datetime.UTC)
+            job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
 
@@ -66,7 +66,7 @@ class VideoProcessingWorker:
             job.status = JobStatus.FINALIZING
             job.current_step = "muxing"
             job.progress_percent = max(job.progress_percent, 80)
-            job.updated_at = datetime.now(datetime.UTC)
+            job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
 
@@ -103,7 +103,7 @@ class VideoProcessingWorker:
             job.status = JobStatus.COMPLETED
             job.current_step = "done"
             job.progress_percent = 100
-            job.updated_at = datetime.now(datetime.UTC)
+            job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
 
