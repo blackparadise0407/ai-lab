@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import Session, select
+from faster_whisper import WhisperModel
 
 from app.db.database import engine
 from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
@@ -171,11 +172,22 @@ class VideoProcessingWorker:
         self._run_cmd(cmd, "audio extraction failed")
 
     def _transcribe_to_srt(self, source_audio: Path) -> str:
-        whisper_api_key = os.getenv("WHISPER_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not whisper_api_key:
-            return "1\n00:00:00,000 --> 00:00:03,000\n[Transcription unavailable in dev mode]\n"
+        model_name = os.getenv("WHISPER_MODEL", "small")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+        model = WhisperModel(model_name, compute_type=compute_type)
+        segments, _ = model.transcribe(str(source_audio), vad_filter=True)
+        srt_blocks: list[str] = []
+        for idx, segment in enumerate(segments, start=1):
+            text = segment.text.strip()
+            if not text:
+                continue
+            start_ts = self._seconds_to_srt_time(segment.start)
+            end_ts = self._seconds_to_srt_time(segment.end)
+            srt_blocks.append(f"{idx}\n{start_ts} --> {end_ts}\n{text}")
 
-        raise PipelineError("Live Whisper transcription is not wired yet; unset WHISPER_API_KEY for local mock mode")
+        if not srt_blocks:
+            raise PipelineError("Whisper returned no transcription segments")
+        return "\n\n".join(srt_blocks) + "\n"
 
     def _translate_srt(self, srt_text: str) -> str:
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -324,6 +336,14 @@ class VideoProcessingWorker:
 
     def _escape_ssml(self, text: str) -> str:
         return re.sub(r"[<>&\"]", lambda m: {"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"}[m.group(0)], text)
+
+    def _seconds_to_srt_time(self, seconds: float) -> str:
+        safe_seconds = max(0.0, float(seconds))
+        millis_total = int(round(safe_seconds * 1000))
+        hours, remainder = divmod(millis_total, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        secs, millis = divmod(remainder, 1_000)
+        return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
 video_processing_worker = VideoProcessingWorker()
