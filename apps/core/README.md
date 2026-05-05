@@ -16,7 +16,6 @@ Create `apps/core/.env` for local testing. `app.main` loads this automatically a
 ```bash
 OPENAI_API_KEY=sk-...
 OPENAI_TRANSLATION_MODEL=gpt-4.1-mini
-# target language comes from each job payload
 
 # Optional pipeline settings
 WHISPER_MODEL=small

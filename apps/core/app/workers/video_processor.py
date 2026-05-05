@@ -196,6 +196,8 @@ class VideoProcessingWorker:
             return srt_text
 
         model = os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-4.1-mini")
+        target_language = os.getenv("TARGET_LANGUAGE", "English")
+
         blocks = self._parse_srt_blocks(srt_text)
         if not blocks:
             return srt_text
