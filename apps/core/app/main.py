@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import RedirectResponse
+from dotenv import load_dotenv
 
 from app.api.routes import artifacts_router, jobs_router, provider_requests_router
 from app.db.database import init_db
@@ -9,6 +10,7 @@ from app.workers.video_processor import video_processing_worker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_dotenv()
     init_db()
     video_processing_worker.start()
     yield
