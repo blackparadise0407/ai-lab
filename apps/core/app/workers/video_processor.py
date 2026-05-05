@@ -194,7 +194,105 @@ class VideoProcessingWorker:
         if not openai_api_key:
             return srt_text
 
-        raise PipelineError("Live GPT translation is not wired yet; unset OPENAI_API_KEY for local mock mode")
+        model = os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-4.1-mini")
+        target_language = os.getenv("TARGET_LANGUAGE", "English")
+
+        blocks = self._parse_srt_blocks(srt_text)
+        if not blocks:
+            return srt_text
+
+        translated_texts = self._translate_lines_with_openai(
+            openai_api_key=openai_api_key,
+            model=model,
+            target_language=target_language,
+            lines=[block[2] for block in blocks],
+        )
+
+        rebuilt_blocks = []
+        for idx, (sequence, timing, _original_text) in enumerate(blocks):
+            translated_line = translated_texts[idx].strip()
+            rebuilt_blocks.append(f"{sequence}\n{timing}\n{translated_line}")
+
+        return "\n\n".join(rebuilt_blocks) + "\n"
+
+    def _parse_srt_blocks(self, srt_text: str) -> list[tuple[str, str, str]]:
+        blocks: list[tuple[str, str, str]] = []
+        for raw_block in re.split(r"\n\s*\n", srt_text.strip()):
+            lines = [line.rstrip() for line in raw_block.splitlines() if line.strip()]
+            if len(lines) < 3:
+                continue
+            if "-->" not in lines[1]:
+                continue
+            sequence = lines[0]
+            timing = lines[1]
+            text = " ".join(lines[2:]).strip()
+            if not text:
+                continue
+            blocks.append((sequence, timing, text))
+        return blocks
+
+    def _translate_lines_with_openai(
+        self,
+        *,
+        openai_api_key: str,
+        model: str,
+        target_language: str,
+        lines: list[str],
+    ) -> list[str]:
+        payload = {
+            "model": model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "You are a professional subtitle translator. Translate each line to "
+                                f"{target_language}. Preserve meaning and tone. Return ONLY a JSON array "
+                                "of translated strings with identical item count and ordering."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": json.dumps(lines, ensure_ascii=False)}],
+                },
+            ],
+        }
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_api_key}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:  # noqa: S310
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise PipelineError(f"OpenAI translation request failed: {exc}") from exc
+
+        translated_raw = response_data.get("output_text", "").strip()
+        if not translated_raw:
+            raise PipelineError("OpenAI translation returned empty output_text")
+
+        try:
+            translated = json.loads(translated_raw)
+        except json.JSONDecodeError as exc:
+            raise PipelineError("OpenAI translation output was not valid JSON") from exc
+
+        if not isinstance(translated, list) or len(translated) != len(lines):
+            raise PipelineError("OpenAI translation output length mismatch")
+
+        normalized = [str(item).strip() for item in translated]
+        if any(not item for item in normalized):
+            raise PipelineError("OpenAI translation produced empty subtitle lines")
+        return normalized
 
     def _compile_ssml(self, translated_srt: str) -> str:
         texts = []
