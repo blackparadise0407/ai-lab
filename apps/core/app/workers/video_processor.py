@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import re
@@ -24,6 +25,7 @@ SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
 
 WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
+logger = logging.getLogger(__name__)
 
 
 class PipelineError(RuntimeError):
@@ -63,7 +65,7 @@ class VideoProcessingWorker:
         try:
             self._process_job_impl(job_id)
         except Exception as exc:  # noqa: BLE001
-            print(str(exc))
+            logger.exception("Video processing failed for job_id=%s", job_id)
             self._mark_job_failed(job_id, "pipeline_error", str(exc))
 
     def _process_job_impl(self, job_id: int) -> None:
@@ -278,7 +280,7 @@ class VideoProcessingWorker:
         except urllib.error.URLError as exc:
             raise PipelineError(f"OpenAI translation request failed: {exc}") from exc
 
-        translated_raw = response_data.get("output_text", "").strip()
+        translated_raw = self._extract_openai_output_text(response_data)
         if not translated_raw:
             raise PipelineError("OpenAI translation returned empty output_text")
 
@@ -295,16 +297,81 @@ class VideoProcessingWorker:
             raise PipelineError("OpenAI translation produced empty subtitle lines")
         return normalized
 
-    def _compile_ssml(self, translated_srt: str) -> str:
-        texts = []
-        for line in translated_srt.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.isdigit() or "-->" in stripped:
-                continue
-            texts.append(self._escape_ssml(stripped))
+    def _extract_openai_output_text(self, response_data: dict) -> str:
+        output_text = response_data.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
 
-        body = "<break time=\"500ms\"/>".join(texts) if texts else "No text"
-        return f"<speak>{body}</speak>"
+        output_items = response_data.get("output")
+        if not isinstance(output_items, list):
+            return ""
+
+        text_chunks: list[str] = []
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            for content_item in item.get("content", []):
+                if not isinstance(content_item, dict):
+                    continue
+                raw_text = content_item.get("text")
+                if isinstance(raw_text, str):
+                    stripped = raw_text.strip()
+                    if stripped:
+                        text_chunks.append(stripped)
+                    continue
+                if isinstance(raw_text, list):
+                    for line in raw_text:
+                        if isinstance(line, str):
+                            stripped = line.strip()
+                            if stripped:
+                                text_chunks.append(stripped)
+
+        return "\n".join(text_chunks).strip()
+
+    def _compile_ssml(self, translated_srt: str) -> str:
+        blocks = self._parse_srt_blocks(translated_srt)
+        if not blocks:
+            return "No text"
+
+        spoken_blocks: list[tuple[float, float, str]] = []
+        for _sequence, timing, text in blocks:
+            escaped_text = self._escape_ssml(text).strip()
+            if not escaped_text:
+                continue
+            start_time, end_time = self._parse_srt_timing_range(timing)
+            spoken_blocks.append((start_time, end_time, escaped_text))
+
+        if not spoken_blocks:
+            return "No text"
+
+        parts: list[str] = []
+        for idx, (_start_time, end_time, text) in enumerate(spoken_blocks):
+            parts.append(text)
+            if idx >= len(spoken_blocks) - 1:
+                continue
+
+            next_start_time = spoken_blocks[idx + 1][0]
+            pause_seconds = max(0.0, next_start_time - end_time)
+            rounded_pause_seconds = round(pause_seconds, 3)
+            if rounded_pause_seconds >= 0.001:
+                parts.append(f"<break time=\"{rounded_pause_seconds:.3f}s\"/>")
+
+        return "".join(parts).strip() or "No text"
+
+    def _parse_srt_timing_range(self, timing: str) -> tuple[float, float]:
+        start_raw, end_raw = [part.strip() for part in timing.split("-->", maxsplit=1)]
+        return self._parse_srt_time(start_raw), self._parse_srt_time(end_raw)
+
+    def _parse_srt_time(self, value: str) -> float:
+        hours_raw, minutes_raw, seconds_raw = value.split(":", maxsplit=2)
+        seconds_part, millis_part = seconds_raw.split(",", maxsplit=1)
+        total_seconds = (
+            int(hours_raw) * 3600
+            + int(minutes_raw) * 60
+            + int(seconds_part)
+            + int(millis_part) / 1000.0
+        )
+        return total_seconds
 
     def _submit_dub_request(self, job_id: int, ssml: str, job_work_dir: Path) -> tuple[Path, str]:
         provider_url = os.getenv("DUB_PROVIDER_URL")
