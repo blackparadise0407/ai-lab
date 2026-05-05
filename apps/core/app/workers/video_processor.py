@@ -278,7 +278,7 @@ class VideoProcessingWorker:
         except urllib.error.URLError as exc:
             raise PipelineError(f"OpenAI translation request failed: {exc}") from exc
 
-        translated_raw = response_data.get("output_text", "").strip()
+        translated_raw = self._extract_openai_output_text(response_data)
         if not translated_raw:
             raise PipelineError("OpenAI translation returned empty output_text")
 
@@ -294,6 +294,37 @@ class VideoProcessingWorker:
         if any(not item for item in normalized):
             raise PipelineError("OpenAI translation produced empty subtitle lines")
         return normalized
+
+    def _extract_openai_output_text(self, response_data: dict) -> str:
+        output_text = response_data.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
+
+        output_items = response_data.get("output")
+        if not isinstance(output_items, list):
+            return ""
+
+        text_chunks: list[str] = []
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            for content_item in item.get("content", []):
+                if not isinstance(content_item, dict):
+                    continue
+                raw_text = content_item.get("text")
+                if isinstance(raw_text, str):
+                    stripped = raw_text.strip()
+                    if stripped:
+                        text_chunks.append(stripped)
+                    continue
+                if isinstance(raw_text, list):
+                    for line in raw_text:
+                        if isinstance(line, str):
+                            stripped = line.strip()
+                            if stripped:
+                                text_chunks.append(stripped)
+
+        return "\n".join(text_chunks).strip()
 
     def _compile_ssml(self, translated_srt: str) -> str:
         texts = []
