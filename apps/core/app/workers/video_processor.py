@@ -63,6 +63,7 @@ class VideoProcessingWorker:
         try:
             self._process_job_impl(job_id)
         except Exception as exc:  # noqa: BLE001
+            print(str(exc))
             self._mark_job_failed(job_id, "pipeline_error", str(exc))
 
     def _process_job_impl(self, job_id: int) -> None:
@@ -196,7 +197,6 @@ class VideoProcessingWorker:
             return srt_text
 
         model = os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-4.1-mini")
-        target_language = os.getenv("TARGET_LANGUAGE", "English")
 
         blocks = self._parse_srt_blocks(srt_text)
         if not blocks:
@@ -277,6 +277,8 @@ class VideoProcessingWorker:
                 response_data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise PipelineError(f"OpenAI translation request failed: {exc}") from exc
+        
+        print(response_data)
 
         translated_raw = response_data.get("output_text", "").strip()
         if not translated_raw:
