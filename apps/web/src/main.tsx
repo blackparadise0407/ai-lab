@@ -6,6 +6,8 @@ import {
   ProviderRequest,
   apiBaseUrl,
   createJob,
+  getArtifactDownloadUrl,
+  getArtifactPreviewUrl,
   getArtifacts,
   getJob,
   getProviderRequests,
@@ -56,6 +58,15 @@ function App() {
     if (!job) return -1;
     return statusOrder.indexOf(job.status);
   }, [job]);
+
+  const finalDubbedVideo = useMemo(
+    () =>
+      artifacts.find(
+        (artifact) =>
+          artifact.artifact_type === 'dubbed_video' || artifact.content_type?.startsWith('video/'),
+      ) ?? null,
+    [artifacts],
+  );
 
   async function refreshDashboard(jobId = job?.id) {
     if (!jobId) return;
@@ -233,6 +244,33 @@ function App() {
         )}
       </section>
 
+      <section className="panel preview-panel">
+        <div className="panel-header split">
+          <div>
+            <p className="eyebrow">Final preview</p>
+            <h2>Dubbed video</h2>
+          </div>
+          {finalDubbedVideo && (
+            <a className="action-link" href={getArtifactDownloadUrl(finalDubbedVideo)} download>
+              Download video
+            </a>
+          )}
+        </div>
+        {finalDubbedVideo ? (
+          <video
+            className="video-preview"
+            controls
+            preload="metadata"
+            src={getArtifactPreviewUrl(finalDubbedVideo)}
+          >
+            <track kind="captions" />
+            Your browser does not support video previews.
+          </video>
+        ) : (
+          <p className="empty-state">The final dubbed video preview appears here after processing completes.</p>
+        )}
+      </section>
+
       <section className="grid two-column">
         <DataPanel title="Artifacts" emptyLabel="No artifacts yet">
           {artifacts.map((artifact) => (
@@ -241,13 +279,14 @@ function App() {
                 <strong>{artifact.artifact_type}</strong>
                 <p>{artifact.content_type ?? 'Unknown content type'}</p>
               </div>
-              {artifact.storage_url.startsWith('http') ? (
-                <a href={artifact.storage_url} target="_blank" rel="noreferrer">
+              <div className="row-actions">
+                <a href={getArtifactDownloadUrl(artifact)} target="_blank" rel="noreferrer">
                   Open
                 </a>
-              ) : (
-                <code>{artifact.storage_url}</code>
-              )}
+                <a href={getArtifactDownloadUrl(artifact)} download>
+                  Download
+                </a>
+              </div>
             </article>
           ))}
         </DataPanel>
