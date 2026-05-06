@@ -5,6 +5,7 @@ import logging
 import os
 import queue
 import re
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -439,20 +440,25 @@ class VideoProcessingWorker:
         cmd = ["ffmpeg", "-y"]
         filter_parts: list[str] = []
         mixed_labels: list[str] = []
-        for input_index, (start_time, _end_time, chunk_path) in enumerate(chunk_specs):
+        for input_index, (start_time, end_time, chunk_path) in enumerate(chunk_specs):
             cmd.extend(["-i", str(chunk_path)])
             delay_ms = int(round(max(0.0, start_time) * 1000))
+            target_duration_seconds = max(0.1, end_time - start_time)
+            tempo_filter = self._build_speedup_filter(chunk_path, target_duration_seconds)
             delayed_label = f"a{input_index}"
-            filter_parts.append(f"[{input_index}:a]adelay={delay_ms}:all=1[{delayed_label}]")
+            filter_parts.append(f"[{input_index}:a]{tempo_filter}adelay={delay_ms}:all=1[{delayed_label}]")
             mixed_labels.append(f"[{delayed_label}]")
 
         if len(mixed_labels) == 1:
             filter_parts.append(f"{mixed_labels[0]}aresample=48000[aout]")
         else:
-            filter_parts.append(
-                "".join(mixed_labels)
-                + f"amix=inputs={len(mixed_labels)}:duration=longest:dropout_transition=0,aresample=48000[aout]"
+            # Keep amix normalization disabled so delayed-but-not-yet-playing chunks do not
+            # get counted as silent active inputs and make the dub level ramp up over time.
+            amix_filter = (
+                f"amix=inputs={len(mixed_labels)}:duration=longest:"
+                "dropout_transition=0:normalize=0"
             )
+            filter_parts.append("".join(mixed_labels) + f"{amix_filter},aresample=48000[aout]")
 
         cmd.extend(
             [
@@ -466,6 +472,51 @@ class VideoProcessingWorker:
             ]
         )
         self._run_cmd(cmd, "TTS chunk merge failed")
+
+    def _build_speedup_filter(self, chunk_path: Path, target_duration_seconds: float) -> str:
+        actual_duration_seconds = self._probe_audio_duration_seconds(chunk_path)
+        if actual_duration_seconds <= target_duration_seconds + 0.02:
+            return ""
+
+        speedup = actual_duration_seconds / target_duration_seconds
+        # atempo changes playback tempo while preserving pitch, avoiding chipmunk-like voices.
+        tempo_filters = ",".join(f"atempo={factor:.6g}" for factor in self._split_atempo_factors(speedup))
+        return f"{tempo_filters},"
+
+    def _split_atempo_factors(self, speedup: float) -> list[float]:
+        factors: list[float] = []
+        remaining_speedup = speedup
+        while remaining_speedup > 2.0:
+            factors.append(2.0)
+            remaining_speedup /= 2.0
+        if remaining_speedup > 1.000001:
+            factors.append(remaining_speedup)
+        return factors
+
+    def _probe_audio_duration_seconds(self, audio_path: Path) -> float:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(audio_path),
+        ]
+        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if process.returncode != 0:
+            details = process.stderr.strip() or process.stdout.strip()
+            raise PipelineError(f"audio duration probe failed: {details}")
+
+        try:
+            duration_seconds = float(json.loads(process.stdout)["format"]["duration"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise PipelineError(f"audio duration probe returned invalid output for {audio_path}") from exc
+
+        if duration_seconds <= 0:
+            raise PipelineError(f"audio duration probe returned non-positive duration for {audio_path}")
+        return duration_seconds
 
     def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
         subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0"
