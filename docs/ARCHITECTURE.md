@@ -14,6 +14,7 @@ Responsibilities:
 - Validate request payloads and state transitions.
 - Receive provider callbacks (e.g., TTS completion).
 - Persist and expose job progress/artifacts.
+- Publish completed videos through upload-provider adapters for external platforms.
 
 ### `apps/worker` (async processing)
 
@@ -22,6 +23,7 @@ Responsibilities:
 - Invoke Whisper transcription and subtitle generation.
 - Run translation and chunked TTS orchestration logic.
 - Delegate TTS provider requests to provider-client adapters and handle retry/backoff orchestration.
+- Delegate final video publishing to upload-provider adapters such as YouTube, Facebook, and TikTok.
 - Perform final media assembly and publish outputs.
 
 ### `apps/web` (React dashboard)
@@ -64,13 +66,14 @@ Responsibilities:
 7. **Rebuild dubbed audio**: place each returned chunk at its SRT start timestamp and mix the chunks into one dubbed track.
 8. **Finalize media**: merge dubbed audio + subtitles into final video.
 9. **Publish artifacts**: expose signed URLs and mark job complete.
+10. **Publish externally (optional)**: upload the completed video through a selected platform adapter.
 
 ## 4) Data and state
 
 Minimum persistent entities:
 - `jobs`: top-level lifecycle, progress, current step, error object.
 - `artifacts`: source + generated file locations.
-- `provider_requests`: external request IDs, callback status, retry counters.
+- `provider_requests`: external request IDs, callback status, retry counters, and upload-provider tracking records.
 
 State progression (happy path):
 `created -> uploaded -> processing -> waiting_provider -> finalizing -> completed`

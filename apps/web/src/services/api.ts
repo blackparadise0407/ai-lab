@@ -1,4 +1,4 @@
-import type { Artifact, Job, ProviderRequest } from '../interfaces/job';
+import type { Artifact, Job, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -7,11 +7,30 @@ export const apiBaseUrl =
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const message = await response.text();
+    const message = await getResponseErrorMessage(response);
     throw new Error(message || `${response.status} ${response.statusText}`);
   }
 
   return response.json() as Promise<T>;
+}
+
+async function getResponseErrorMessage(response: Response) {
+  const rawMessage = await response.text();
+  if (!rawMessage) return '';
+
+  try {
+    const parsed = JSON.parse(rawMessage) as { detail?: unknown };
+    if (typeof parsed.detail === 'string') {
+      return parsed.detail;
+    }
+    if (Array.isArray(parsed.detail)) {
+      return parsed.detail.map((item) => JSON.stringify(item)).join('; ');
+    }
+  } catch {
+    return rawMessage;
+  }
+
+  return rawMessage;
 }
 
 export async function createJob(sourceLanguage: string, targetLanguage: string) {
@@ -49,6 +68,16 @@ export async function getArtifacts(jobId: number) {
 export async function getProviderRequests(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/provider-requests/job/${jobId}`);
   return parseJsonResponse<ProviderRequest[]>(response);
+}
+
+export async function publishJobUpload(jobId: number, payload: PublishUploadRequest) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}/uploads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  return parseJsonResponse<PublishUploadResponse>(response);
 }
 
 function isExternalArtifactUrl(artifact: Artifact) {
