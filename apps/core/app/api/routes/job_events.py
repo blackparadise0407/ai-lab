@@ -5,6 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session, select
 
 from app.api.job_updates import job_update_broker
+from app.api.origins import is_allowed_browser_origin
 from app.db.database import get_session
 from app.models.entities import Artifact, Job, ProviderRequest
 
@@ -47,6 +48,10 @@ async def _send_snapshot(websocket: WebSocket, job_id: int, event: str) -> bool:
 
 @router.websocket("/{job_id}/events")
 async def stream_job_events(websocket: WebSocket, job_id: int):
+    if not is_allowed_browser_origin(websocket.headers.get("origin")):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await websocket.accept()
     has_snapshot = await _send_snapshot(websocket, job_id, "snapshot")
     if not has_snapshot:
