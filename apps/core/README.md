@@ -29,9 +29,18 @@ DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
 DUB_PROVIDER_APP_ID=
 DUB_PROVIDER_TOKEN=
 
-# Optional publishing adapters. If *_UPLOAD_URL is omitted, adapters return mock uploads.
-YOUTUBE_UPLOAD_URL=
-YOUTUBE_ACCESS_TOKEN=
+# Optional YouTube Data API upload adapter.
+# If all YouTube OAuth values are omitted, YouTube uploads return mock tracking metadata.
+YOUTUBE_CLIENT_ID=
+YOUTUBE_CLIENT_SECRET=
+YOUTUBE_REFRESH_TOKEN=
+YOUTUBE_TOKEN_URI=https://oauth2.googleapis.com/token
+YOUTUBE_CATEGORY_ID=22
+YOUTUBE_TAGS=
+YOUTUBE_UPLOAD_CHUNK_SIZE=-1
+YOUTUBE_UPLOAD_MAX_RETRIES=10
+
+# Optional generic publishing adapters. If *_UPLOAD_URL is omitted, adapters return mock uploads.
 FACEBOOK_UPLOAD_URL=
 FACEBOOK_ACCESS_TOKEN=
 TIKTOK_UPLOAD_URL=
@@ -48,4 +57,4 @@ If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV
 
 Dub provider API calls, polling, downloads, batching, voice configuration, and mock silent chunk generation live in `app.providers.dub_provider` instead of the video processing worker.
 
-Upload provider publishing uses an adapter interface in `app.providers.upload_provider`. The first supported adapters are `youtube`, `facebook`, and `tiktok`; each reads its own `*_UPLOAD_URL` and `*_ACCESS_TOKEN` variables and falls back to mock tracking metadata when no upload URL is configured. Publish a completed job with `POST /v1/jobs/{job_id}/uploads` and a body containing `platform`, `title`, optional `description`, and optional `privacy`.
+Upload provider publishing uses an adapter interface in `app.providers.upload_provider`. The first supported adapters are `youtube`, `facebook`, and `tiktok`. The YouTube adapter uses the YouTube Data API `videos.insert` flow with OAuth refresh-token credentials, resumable media uploads, category/tags metadata, valid privacy values (`public`, `private`, `unlisted`), and exponential-backoff retries for retriable upload failures. If no YouTube OAuth credentials are configured, it falls back to mock tracking metadata for local development. Facebook and TikTok still use the generic token-authenticated multipart adapter and return mock metadata when their upload URLs are omitted. Publish a completed job with `POST /v1/jobs/{job_id}/uploads` and a body containing `platform`, `title`, optional `description`, and optional `privacy`.
