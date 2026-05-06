@@ -21,6 +21,8 @@ import type {
   Job,
   JobEventPayload,
   ProviderRequest,
+  PublishUploadResponse,
+  UploadPlatform,
 } from "../interfaces/job";
 import {
   apiBaseUrl,
@@ -30,6 +32,7 @@ import {
   getArtifacts,
   getJob,
   getProviderRequests,
+  publishJobUpload,
   uploadSourceVideo,
 } from "../services/api";
 import { subscribeToJobEvents } from "../services/jobEvents";
@@ -69,6 +72,28 @@ const statusOrder: Job["status"][] = [
   "completed",
 ];
 
+const uploadPlatformOptions: {
+  value: UploadPlatform;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "youtube",
+    label: "YouTube",
+    description: "Publish with the YouTube upload adapter.",
+  },
+  {
+    value: "facebook",
+    label: "Facebook",
+    description: "Publish with the Facebook video adapter.",
+  },
+  {
+    value: "tiktok",
+    label: "TikTok",
+    description: "Publish with the TikTok video adapter.",
+  },
+];
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -97,13 +122,50 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function getJobIdFromUrl() {
+  const rawJobId = new URLSearchParams(window.location.search).get("jobId");
+  if (!rawJobId) return null;
+
+  const parsedJobId = Number(rawJobId);
+  return Number.isInteger(parsedJobId) && parsedJobId > 0 ? parsedJobId : null;
+}
+
+function setJobIdInUrl(jobId: number | null) {
+  const url = new URL(window.location.href);
+
+  if (jobId === null) {
+    url.searchParams.delete("jobId");
+  } else {
+    url.searchParams.set("jobId", String(jobId));
+  }
+
+  window.history.replaceState(
+    null,
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+}
+
 function App() {
   const [sourceLanguage, setSourceLanguage] = useState("zh");
   const [targetLanguage, setTargetLanguage] = useState("vi");
   const [file, setFile] = useState<File | null>(null);
-  const [jobIdInput, setJobIdInput] = useState("");
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(() =>
+    getJobIdFromUrl(),
+  );
+  const [jobIdInput, setJobIdInput] = useState(() => {
+    const initialJobId = getJobIdFromUrl();
+    return initialJobId === null ? "" : String(initialJobId);
+  });
   const [formError, setFormError] = useState<string | null>(null);
+  const [publishPlatform, setPublishPlatform] =
+    useState<UploadPlatform>("youtube");
+  const [publishTitle, setPublishTitle] = useState("");
+  const [publishDescription, setPublishDescription] = useState("");
+  const [publishPrivacy, setPublishPrivacy] = useState("private");
+  const [publishResult, setPublishResult] =
+    useState<PublishUploadResponse | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [socketStatus, setSocketStatus] = useState<
     "idle" | "connected" | "disconnected" | "error"
   >("idle");
@@ -126,6 +188,21 @@ function App() {
     queryFn: () => getProviderRequests(selectedJobId!),
     enabled: selectedJobId !== null,
   });
+
+  useEffect(() => {
+    setJobIdInUrl(selectedJobId);
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const jobIdFromUrl = getJobIdFromUrl();
+      setSelectedJobId(jobIdFromUrl);
+      setJobIdInput(jobIdFromUrl === null ? "" : String(jobIdFromUrl));
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (selectedJobId === null) {
@@ -157,6 +234,14 @@ function App() {
     });
   }, [queryClient, selectedJobId]);
 
+  useEffect(() => {
+    setPublishTitle("");
+    setPublishDescription("");
+    setPublishPrivacy("private");
+    setPublishResult(null);
+    setPublishError(null);
+  }, [selectedJobId]);
+
   const createAndUploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) {
@@ -176,6 +261,40 @@ function App() {
     onError: (error) => {
       setFormError(
         getErrorMessage(error, "Unable to create and upload the job."),
+      );
+    },
+  });
+
+  const publishUploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!job) {
+        throw new Error("Load a completed job before publishing.");
+      }
+      if (job.status !== "completed") {
+        throw new Error("Job must be completed before publishing.");
+      }
+      if (!publishTitle.trim()) {
+        throw new Error("Enter a publish title.");
+      }
+
+      return publishJobUpload(job.id, {
+        platform: publishPlatform,
+        title: publishTitle.trim(),
+        description: publishDescription.trim(),
+        privacy: publishPrivacy.trim() || "private",
+      });
+    },
+    onSuccess: async (result) => {
+      setPublishError(null);
+      setPublishResult(result);
+      await queryClient.invalidateQueries({
+        queryKey: ["provider-requests", result.job_id],
+      });
+    },
+    onError: (error) => {
+      setPublishResult(null);
+      setPublishError(
+        getErrorMessage(error, "Unable to publish the completed video."),
       );
     },
   });
@@ -210,6 +329,11 @@ function App() {
     [artifacts],
   );
 
+  useEffect(() => {
+    if (!job || publishTitle.trim()) return;
+    setPublishTitle(`${job.external_job_id} dubbed video`);
+  }, [job, publishTitle]);
+
   async function refreshDashboard(jobId = selectedJobId) {
     if (!jobId) return;
 
@@ -236,6 +360,11 @@ function App() {
 
     setFormError(null);
     setSelectedJobId(parsedId);
+  }
+
+  function handlePublishUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    publishUploadMutation.mutate();
   }
 
   return (
@@ -487,6 +616,125 @@ function App() {
               completes.
             </EmptyState>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+        <CardHeader>
+          <div>
+            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
+              Publish
+            </CardDescription>
+            <CardTitle className="mt-2 text-2xl">
+              Upload completed video
+            </CardTitle>
+            <CardDescription>
+              Send the completed dubbed artifact to YouTube, Facebook, or TikTok
+              through the Core API upload adapter.
+            </CardDescription>
+          </div>
+          <CardAction>
+            {job?.status === "completed" ? (
+              <Badge className="bg-emerald-100 text-emerald-700">Ready</Badge>
+            ) : (
+              <Badge variant="secondary">Waiting for completed job</Badge>
+            )}
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <form className="grid gap-4" onSubmit={handlePublishUpload}>
+            <div className="grid gap-3 md:grid-cols-3">
+              {uploadPlatformOptions.map((platform) => (
+                <button
+                  key={platform.value}
+                  type="button"
+                  className={cn(
+                    "rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                    publishPlatform === platform.value &&
+                      "border-primary bg-primary/10 ring-2 ring-primary/20",
+                  )}
+                  onClick={() => setPublishPlatform(platform.value)}
+                >
+                  <span className="font-black">{platform.label}</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    {platform.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+              <div className="grid gap-2">
+                <Label htmlFor="publish-title">Title</Label>
+                <Input
+                  id="publish-title"
+                  maxLength={150}
+                  placeholder="Dubbed video title"
+                  value={publishTitle}
+                  onChange={(event) => setPublishTitle(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="publish-privacy">Privacy</Label>
+                <Input
+                  id="publish-privacy"
+                  placeholder="private"
+                  value={publishPrivacy}
+                  onChange={(event) => setPublishPrivacy(event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="publish-description">Description</Label>
+              <textarea
+                id="publish-description"
+                className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                maxLength={5000}
+                placeholder="Optional platform description"
+                value={publishDescription}
+                onChange={(event) => setPublishDescription(event.target.value)}
+              />
+            </div>
+            {publishError && (
+              <p className="text-sm font-medium text-destructive">
+                {publishError}
+              </p>
+            )}
+            {publishResult && (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                <strong>Published to {publishResult.platform}.</strong>
+                <p className="mt-1 break-all">
+                  Provider request: {publishResult.provider_request_id}
+                </p>
+                {publishResult.remote_url && (
+                  <a
+                    className="mt-2 inline-flex items-center gap-2 font-bold text-emerald-800 underline"
+                    href={publishResult.remote_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open published video
+                    <ExternalLink className="size-4" />
+                  </a>
+                )}
+              </div>
+            )}
+            <Button
+              type="submit"
+              size="lg"
+              disabled={
+                !finalDubbedVideo ||
+                job?.status !== "completed" ||
+                publishUploadMutation.isPending
+              }
+            >
+              {publishUploadMutation.isPending && (
+                <Loader2 className="animate-spin" />
+              )}
+              {publishUploadMutation.isPending
+                ? "Publishing…"
+                : `Publish to ${uploadPlatformOptions.find((platform) => platform.value === publishPlatform)?.label}`}
+            </Button>
+          </form>
         </CardContent>
       </Card>
 
