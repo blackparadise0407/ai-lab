@@ -92,3 +92,23 @@ export async function getProviderRequests(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/provider-requests/job/${jobId}`);
   return parseJsonResponse<ProviderRequest[]>(response);
 }
+
+function isExternalArtifactUrl(artifact: Artifact) {
+  return /^https?:\/\//i.test(artifact.storage_url);
+}
+
+export function getArtifactDownloadUrl(artifact: Artifact) {
+  if (isExternalArtifactUrl(artifact)) {
+    return artifact.storage_url;
+  }
+
+  return `${apiBaseUrl}/v1/artifacts/${artifact.id}/download`;
+}
+
+export function getArtifactPreviewUrl(artifact: Artifact) {
+  if (isExternalArtifactUrl(artifact)) {
+    return artifact.storage_url;
+  }
+
+  return `${getArtifactDownloadUrl(artifact)}?disposition=inline`;
+}
