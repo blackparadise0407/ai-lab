@@ -1,9 +1,12 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useMemo, useState } from 'react';
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import ReactDOM from 'react-dom/client';
+
 import {
-  Artifact,
-  Job,
-  ProviderRequest,
+  type Artifact,
+  type Job,
+  type ProviderRequest,
   apiBaseUrl,
   createJob,
   getArtifactDownloadUrl,
@@ -13,6 +16,14 @@ import {
   getProviderRequests,
   uploadSourceVideo,
 } from './api';
+import { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
+import { Badge } from './components/ui/badge';
+import { Button, buttonVariants } from './components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
+import { Input } from './components/ui/input';
+import { Label } from './components/ui/label';
+import { Progress } from './components/ui/progress';
+import { cn } from './lib/utils';
 import './styles.css';
 
 const statusLabels: Record<Job['status'], string> = {
@@ -35,6 +46,15 @@ const statusOrder: Job['status'][] = [
   'completed',
 ];
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2_500,
+      retry: 1,
+    },
+  },
+});
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
@@ -42,17 +62,72 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function App() {
   const [sourceLanguage, setSourceLanguage] = useState('zh');
   const [targetLanguage, setTargetLanguage] = useState('vi');
   const [file, setFile] = useState<File | null>(null);
   const [jobIdInput, setJobIdInput] = useState('');
-  const [job, setJob] = useState<Job | null>(null);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [providerRequests, setProviderRequests] = useState<ProviderRequest[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const jobQuery = useQuery({
+    queryKey: ['job', selectedJobId],
+    queryFn: () => getJob(selectedJobId!),
+    enabled: selectedJobId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && !['completed', 'failed', 'canceled'].includes(status) ? 5_000 : false;
+    },
+  });
+
+  const artifactsQuery = useQuery({
+    queryKey: ['artifacts', selectedJobId],
+    queryFn: () => getArtifacts(selectedJobId!),
+    enabled: selectedJobId !== null,
+    refetchInterval: jobQuery.data && !['completed', 'failed', 'canceled'].includes(jobQuery.data.status) ? 5_000 : false,
+  });
+
+  const providerRequestsQuery = useQuery({
+    queryKey: ['provider-requests', selectedJobId],
+    queryFn: () => getProviderRequests(selectedJobId!),
+    enabled: selectedJobId !== null,
+    refetchInterval: jobQuery.data && !['completed', 'failed', 'canceled'].includes(jobQuery.data.status) ? 5_000 : false,
+  });
+
+  const createAndUploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) {
+        throw new Error('Choose a source video before creating a job.');
+      }
+
+      const created = await createJob(sourceLanguage, targetLanguage);
+      return uploadSourceVideo(created.id, file);
+    },
+    onSuccess: async (uploaded) => {
+      setFormError(null);
+      setSelectedJobId(uploaded.id);
+      setJobIdInput(String(uploaded.id));
+      await queryClient.invalidateQueries({ queryKey: ['job', uploaded.id] });
+      await queryClient.invalidateQueries({ queryKey: ['artifacts', uploaded.id] });
+      await queryClient.invalidateQueries({ queryKey: ['provider-requests', uploaded.id] });
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, 'Unable to create and upload the job.'));
+    },
+  });
+
+  const job = jobQuery.data ?? null;
+  const artifacts = artifactsQuery.data ?? [];
+  const providerRequests = providerRequestsQuery.data ?? [];
+  const isRefreshing = jobQuery.isFetching || artifactsQuery.isFetching || providerRequestsQuery.isFetching;
+  const isLoadingJob = jobQuery.isLoading || artifactsQuery.isLoading || providerRequestsQuery.isLoading;
+  const dashboardError = jobQuery.error ?? artifactsQuery.error ?? providerRequestsQuery.error;
+  const error = formError ?? (dashboardError ? getErrorMessage(dashboardError, 'Unable to refresh the dashboard.') : null);
 
   const activeStepIndex = useMemo(() => {
     if (!job) return -1;
@@ -68,239 +143,234 @@ function App() {
     [artifacts],
   );
 
-  async function refreshDashboard(jobId = job?.id) {
+  async function refreshDashboard(jobId = selectedJobId) {
     if (!jobId) return;
 
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [jobResponse, artifactResponse, providerResponse] = await Promise.all([
-        getJob(jobId),
-        getArtifacts(jobId),
-        getProviderRequests(jobId),
-      ]);
-      setJob(jobResponse);
-      setArtifacts(artifactResponse);
-      setProviderRequests(providerResponse);
-      setJobIdInput(String(jobResponse.id));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to refresh the dashboard.');
-    } finally {
-      setIsLoading(false);
-    }
+    setFormError(null);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] }),
+      queryClient.invalidateQueries({ queryKey: ['artifacts', jobId] }),
+      queryClient.invalidateQueries({ queryKey: ['provider-requests', jobId] }),
+    ]);
   }
 
-  async function handleCreateAndUpload(event: FormEvent<HTMLFormElement>) {
+  function handleCreateAndUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!file) {
-      setError('Choose a source video before creating a job.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const created = await createJob(sourceLanguage, targetLanguage);
-      const uploaded = await uploadSourceVideo(created.id, file);
-      setJob(uploaded);
-      setJobIdInput(String(uploaded.id));
-      await refreshDashboard(uploaded.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to create and upload the job.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    createAndUploadMutation.mutate();
   }
 
-  async function handleLoadExisting(event: FormEvent<HTMLFormElement>) {
+  function handleLoadExisting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsedId = Number(jobIdInput);
     if (!Number.isInteger(parsedId) || parsedId <= 0) {
-      setError('Enter a valid numeric job ID.');
+      setFormError('Enter a valid numeric job ID.');
       return;
     }
 
-    await refreshDashboard(parsedId);
+    setFormError(null);
+    setSelectedJobId(parsedId);
   }
 
-  useEffect(() => {
-    if (!job || ['completed', 'failed', 'canceled'].includes(job.status)) return;
-
-    const intervalId = window.setInterval(() => {
-      refreshDashboard(job.id);
-    }, 5000);
-
-    return () => window.clearInterval(intervalId);
-  }, [job?.id, job?.status]);
-
   return (
-    <main className="shell">
-      <section className="hero">
+    <main className="mx-auto min-h-screen max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+      <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
         <div>
-          <p className="eyebrow">AI Lab Dubbing Pipeline</p>
-          <h1>React dashboard for creating, tracking, and reviewing dubbing jobs.</h1>
-          <p className="hero-copy">
-            Create a pipeline job, upload source video, watch status updates, and inspect the
-            generated artifacts and provider requests from one lightweight client-side app.
+          <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">AI Lab Dubbing Pipeline</p>
+          <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
+            React dashboard for creating, tracking, and reviewing dubbing jobs.
+          </h1>
+          <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
+            Create a pipeline job, upload source video, watch status updates, and inspect the generated
+            artifacts and provider requests from one Tailwind + shadcn/ui client-side app.
           </p>
         </div>
-        <div className="api-card">
-          <span>Connected API</span>
-          <strong>{apiBaseUrl}</strong>
-        </div>
+        <Card className="border-primary/10 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur">
+          <CardHeader>
+            <CardDescription>Connected API</CardDescription>
+            <CardTitle className="break-all text-lg">{apiBaseUrl}</CardTitle>
+          </CardHeader>
+        </Card>
       </section>
 
-      {error && <div className="alert">{error}</div>}
+      {error && (
+        <Alert variant="destructive" className="mb-6 bg-red-50">
+          <AlertCircle />
+          <AlertTitle>Dashboard error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-      <section className="grid two-column">
-        <form className="panel" onSubmit={handleCreateAndUpload}>
-          <div className="panel-header">
-            <span className="step-number">1</span>
+      <section className="mb-6 grid gap-6 lg:grid-cols-2">
+        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+          <CardHeader className="grid-cols-[auto_1fr] items-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
+              1
+            </span>
             <div>
-              <h2>Create pipeline job</h2>
-              <p>Defaults match the current ZH → VI dubbing workflow.</p>
+              <CardTitle>Create pipeline job</CardTitle>
+              <CardDescription>Defaults match the current ZH → VI dubbing workflow.</CardDescription>
             </div>
-          </div>
-          <label>
-            Source language
-            <input value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)} />
-          </label>
-          <label>
-            Target language
-            <input value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)} />
-          </label>
-          <label>
-            Source video
-            <input
-              type="file"
-              accept="video/*"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Creating and uploading…' : 'Create job and upload video'}
-          </button>
-        </form>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-4" onSubmit={handleCreateAndUpload}>
+              <div className="grid gap-2">
+                <Label htmlFor="source-language">Source language</Label>
+                <Input
+                  id="source-language"
+                  value={sourceLanguage}
+                  onChange={(event) => setSourceLanguage(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="target-language">Target language</Label>
+                <Input
+                  id="target-language"
+                  value={targetLanguage}
+                  onChange={(event) => setTargetLanguage(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="source-video">Source video</Label>
+                <Input
+                  id="source-video"
+                  type="file"
+                  accept="video/*"
+                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                />
+              </div>
+              <Button type="submit" size="lg" disabled={createAndUploadMutation.isPending}>
+                {createAndUploadMutation.isPending && <Loader2 className="animate-spin" />}
+                {createAndUploadMutation.isPending ? 'Creating and uploading…' : 'Create job and upload video'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
-        <form className="panel" onSubmit={handleLoadExisting}>
-          <div className="panel-header">
-            <span className="step-number">2</span>
+        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+          <CardHeader className="grid-cols-[auto_1fr] items-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
+              2
+            </span>
             <div>
-              <h2>Open existing job</h2>
-              <p>Use a job ID from Swagger, logs, or a previous dashboard session.</p>
+              <CardTitle>Open existing job</CardTitle>
+              <CardDescription>Use a job ID from Swagger, logs, or a previous dashboard session.</CardDescription>
             </div>
-          </div>
-          <label>
-            Job ID
-            <input
-              inputMode="numeric"
-              placeholder="Example: 1"
-              value={jobIdInput}
-              onChange={(event) => setJobIdInput(event.target.value)}
-            />
-          </label>
-          <button type="submit" disabled={isLoading}>
-            {isLoading ? 'Loading…' : 'Load job'}
-          </button>
-          {job && (
-            <button className="secondary" type="button" onClick={() => refreshDashboard(job.id)}>
-              Refresh now
-            </button>
-          )}
-        </form>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-4" onSubmit={handleLoadExisting}>
+              <div className="grid gap-2">
+                <Label htmlFor="job-id">Job ID</Label>
+                <Input
+                  id="job-id"
+                  inputMode="numeric"
+                  placeholder="Example: 1"
+                  value={jobIdInput}
+                  onChange={(event) => setJobIdInput(event.target.value)}
+                />
+              </div>
+              <Button type="submit" size="lg" disabled={isLoadingJob}>
+                {isLoadingJob && <Loader2 className="animate-spin" />}
+                {isLoadingJob ? 'Loading…' : 'Load job'}
+              </Button>
+              {job && (
+                <Button variant="secondary" type="button" onClick={() => refreshDashboard(job.id)} disabled={isRefreshing}>
+                  <RefreshCw className={cn(isRefreshing && 'animate-spin')} />
+                  Refresh now
+                </Button>
+              )}
+            </form>
+          </CardContent>
+        </Card>
       </section>
 
-      <section className="panel dashboard-panel">
-        <div className="panel-header split">
+      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+        <CardHeader>
           <div>
-            <p className="eyebrow">Pipeline status</p>
-            <h2>{job ? `Job #${job.id} · ${job.external_job_id}` : 'No job loaded'}</h2>
+            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">Pipeline status</CardDescription>
+            <CardTitle className="mt-2 text-2xl">
+              {job ? `Job #${job.id} · ${job.external_job_id}` : 'No job loaded'}
+            </CardTitle>
           </div>
-          {job && <span className={`status-pill status-${job.status}`}>{statusLabels[job.status]}</span>}
-        </div>
+          <CardAction>
+            {job && <StatusBadge status={job.status}>{statusLabels[job.status]}</StatusBadge>}
+          </CardAction>
+        </CardHeader>
 
-        {job ? (
-          <>
-            <div className="progress-track" aria-label={`Progress ${job.progress_percent}%`}>
-              <span style={{ width: `${job.progress_percent}%` }} />
+        <CardContent>
+          {job ? (
+            <div className="grid gap-5">
+              <Progress value={job.progress_percent} aria-label={`Progress ${job.progress_percent}%`} className="h-4" />
+              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                <Badge variant="secondary">{job.source_language.toUpperCase()} → {job.target_language.toUpperCase()}</Badge>
+                <Badge variant="secondary">{job.progress_percent}% complete</Badge>
+                <Badge variant="secondary">Updated {formatDate(job.updated_at)}</Badge>
+                <Badge variant="secondary">{job.current_step ?? 'Waiting for next step'}</Badge>
+              </div>
+              <ol className="grid gap-3 lg:grid-cols-6">
+                {statusOrder.map((status, index) => (
+                  <li
+                    key={status}
+                    className={cn(
+                      'flex items-center gap-3 rounded-xl border bg-slate-50 p-3 text-sm font-bold text-muted-foreground',
+                      index <= activeStepIndex && 'border-primary/20 bg-primary/10 text-primary',
+                    )}
+                  >
+                    <span className="flex size-7 items-center justify-center rounded-full bg-white text-xs shadow-sm">
+                      {index + 1}
+                    </span>
+                    {statusLabels[status]}
+                  </li>
+                ))}
+              </ol>
             </div>
-            <div className="job-meta">
-              <span>{job.source_language.toUpperCase()} → {job.target_language.toUpperCase()}</span>
-              <span>{job.progress_percent}% complete</span>
-              <span>Updated {formatDate(job.updated_at)}</span>
-              <span>{job.current_step ?? 'Waiting for next step'}</span>
-            </div>
-            <ol className="timeline">
-              {statusOrder.map((status, index) => (
-                <li key={status} className={index <= activeStepIndex ? 'active' : ''}>
-                  <span>{index + 1}</span>
-                  {statusLabels[status]}
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : (
-          <p className="empty-state">Create a job or load an existing one to see pipeline telemetry.</p>
-        )}
-      </section>
-
-      <section className="panel preview-panel">
-        <div className="panel-header split">
-          <div>
-            <p className="eyebrow">Final preview</p>
-            <h2>Dubbed video</h2>
-          </div>
-          {finalDubbedVideo && (
-            <a className="action-link" href={getArtifactDownloadUrl(finalDubbedVideo)} download>
-              Download video
-            </a>
+          ) : (
+            <EmptyState>Create a job or load an existing one to see pipeline telemetry.</EmptyState>
           )}
-        </div>
-        {finalDubbedVideo ? (
-          <video
-            className="video-preview"
-            controls
-            preload="metadata"
-            src={getArtifactPreviewUrl(finalDubbedVideo)}
-          >
-            <track kind="captions" />
-            Your browser does not support video previews.
-          </video>
-        ) : (
-          <p className="empty-state">The final dubbed video preview appears here after processing completes.</p>
-        )}
-      </section>
+        </CardContent>
+      </Card>
 
-      <section className="grid two-column">
-        <DataPanel title="Artifacts" emptyLabel="No artifacts yet">
+      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+        <CardHeader>
+          <div>
+            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">Final preview</CardDescription>
+            <CardTitle className="mt-2 text-2xl">Dubbed video</CardTitle>
+          </div>
+          <CardAction>
+            {finalDubbedVideo && (
+              <a className={buttonVariants({ size: 'sm' })} href={getArtifactDownloadUrl(finalDubbedVideo)} download>
+                <Download />
+                Download video
+              </a>
+            )}
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {finalDubbedVideo ? (
+            <video
+              className="block aspect-video max-h-[68vh] w-full rounded-2xl bg-slate-950 object-contain"
+              controls
+              preload="metadata"
+              src={getArtifactPreviewUrl(finalDubbedVideo)}
+            >
+              <track kind="captions" />
+              Your browser does not support video previews.
+            </video>
+          ) : (
+            <EmptyState>The final dubbed video preview appears here after processing completes.</EmptyState>
+          )}
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <DataPanel title="Artifacts" count={artifacts.length} emptyLabel="No artifacts yet">
           {artifacts.map((artifact) => (
-            <article className="data-row" key={artifact.id}>
-              <div>
-                <strong>{artifact.artifact_type}</strong>
-                <p>{artifact.content_type ?? 'Unknown content type'}</p>
-              </div>
-              <div className="row-actions">
-                <a href={getArtifactDownloadUrl(artifact)} target="_blank" rel="noreferrer">
-                  Open
-                </a>
-                <a href={getArtifactDownloadUrl(artifact)} download>
-                  Download
-                </a>
-              </div>
-            </article>
+            <ArtifactRow artifact={artifact} key={artifact.id} />
           ))}
         </DataPanel>
 
-        <DataPanel title="Provider requests" emptyLabel="No provider requests yet">
+        <DataPanel title="Provider requests" count={providerRequests.length} emptyLabel="No provider requests yet">
           {providerRequests.map((request) => (
-            <article className="data-row" key={request.id}>
-              <div>
-                <strong>{request.provider_name}</strong>
-                <p>{request.provider_request_id}</p>
-                {request.last_error && <p className="row-error">{request.last_error}</p>}
-              </div>
-              <span>{request.status}</span>
-            </article>
+            <ProviderRequestRow request={request} key={request.id} />
           ))}
         </DataPanel>
       </section>
@@ -308,30 +378,89 @@ function App() {
   );
 }
 
+function StatusBadge({ status, children }: { status: Job['status']; children: React.ReactNode }) {
+  const className = {
+    created: 'bg-blue-100 text-blue-700',
+    uploaded: 'bg-blue-100 text-blue-700',
+    processing: 'bg-amber-100 text-amber-800',
+    waiting_provider: 'bg-amber-100 text-amber-800',
+    finalizing: 'bg-amber-100 text-amber-800',
+    completed: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-red-100 text-red-700',
+    canceled: 'bg-red-100 text-red-700',
+  }[status];
+
+  return <Badge className={cn('uppercase', className)}>{children}</Badge>;
+}
+
 function DataPanel({
   title,
+  count,
   emptyLabel,
   children,
 }: {
   title: string;
+  count: number;
   emptyLabel: string;
-  children: React.ReactNode[] | React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const childCount = React.Children.count(children);
-
   return (
-    <section className="panel list-panel">
-      <div className="panel-header split">
-        <h2>{title}</h2>
-        <span>{childCount}</span>
-      </div>
-      {childCount > 0 ? <div className="data-list">{children}</div> : <p className="empty-state">{emptyLabel}</p>}
-    </section>
+    <Card className="max-h-[34rem] min-h-72 bg-white/90 shadow-xl shadow-slate-900/5">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardAction>
+          <Badge variant="secondary">{count}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="min-h-0 flex-1 overflow-y-auto pr-4">
+        {count > 0 ? <div className="grid gap-3">{children}</div> : <EmptyState>{emptyLabel}</EmptyState>}
+      </CardContent>
+    </Card>
   );
+}
+
+function ArtifactRow({ artifact }: { artifact: Artifact }) {
+  return (
+    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
+      <div>
+        <strong>{artifact.artifact_type}</strong>
+        <p className="mt-1 break-all text-sm text-muted-foreground">{artifact.content_type ?? 'Unknown content type'}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={getArtifactDownloadUrl(artifact)} target="_blank" rel="noreferrer">
+          <ExternalLink />
+          Open
+        </a>
+        <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={getArtifactDownloadUrl(artifact)} download>
+          <Download />
+          Download
+        </a>
+      </div>
+    </article>
+  );
+}
+
+function ProviderRequestRow({ request }: { request: ProviderRequest }) {
+  return (
+    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
+      <div>
+        <strong>{request.provider_name}</strong>
+        <p className="mt-1 break-all text-sm text-muted-foreground">{request.provider_request_id}</p>
+        {request.last_error && <p className="mt-1 break-all text-sm font-medium text-destructive">{request.last_error}</p>}
+      </div>
+      <Badge variant="secondary">{request.status}</Badge>
+    </article>
+  );
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-2xl border border-dashed bg-slate-50 p-6 text-center text-sm text-muted-foreground">{children}</p>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
   </React.StrictMode>,
 );
