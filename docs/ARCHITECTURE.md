@@ -21,7 +21,7 @@ Responsibilities:
 - Execute pipeline steps outside request/response cycle.
 - Invoke Whisper transcription and subtitle generation.
 - Run translation and chunked TTS orchestration logic.
-- Submit TTS requests and handle retry/backoff logic.
+- Delegate TTS provider requests to provider-client adapters and handle retry/backoff orchestration.
 - Perform final media assembly and publish outputs.
 
 ### `apps/web` (dashboard)
@@ -59,7 +59,7 @@ Responsibilities:
 3. **Transcribe**: produce timestamped source segments.
 4. **Translate**: convert ZH text to VI text.
 5. **Chunk TTS input**: split translated subtitles into one synthesis request per SRT cue.
-6. **Synthesize speech**: send each cue to the provider and capture returned audio chunks.
+6. **Synthesize speech**: send cues to the provider in bounded parallel batches and capture returned audio chunks.
 7. **Rebuild dubbed audio**: place each returned chunk at its SRT start timestamp and mix the chunks into one dubbed track.
 8. **Finalize media**: merge dubbed audio + subtitles into final video.
 9. **Publish artifacts**: expose signed URLs and mark job complete.
@@ -87,7 +87,7 @@ Terminal states:
 
 ## 6) Directory summary
 
-- `apps/core`: API entrypoint and orchestration control plane.
+- `apps/core`: API entrypoint, provider clients, and orchestration control plane.
 - `apps/worker`: asynchronous compute plane.
 - `apps/web`: user-facing interface.
 - `services/media`: media toolchain abstraction.
