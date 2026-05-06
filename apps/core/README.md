@@ -28,6 +28,14 @@ DUB_PROVIDER_VOICE_CODE=hn_female_ngochuyen_full_48k-fhg
 DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
 DUB_PROVIDER_APP_ID=
 DUB_PROVIDER_TOKEN=
+
+# Optional publishing adapters. If *_UPLOAD_URL is omitted, adapters return mock uploads.
+YOUTUBE_UPLOAD_URL=
+YOUTUBE_ACCESS_TOKEN=
+FACEBOOK_UPLOAD_URL=
+FACEBOOK_ACCESS_TOKEN=
+TIKTOK_UPLOAD_URL=
+TIKTOK_ACCESS_TOKEN=
 ```
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
@@ -39,3 +47,5 @@ If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV
 ## Provider integration
 
 Dub provider API calls, polling, downloads, batching, voice configuration, and mock silent chunk generation live in `app.providers.dub_provider` instead of the video processing worker.
+
+Upload provider publishing uses an adapter interface in `app.providers.upload_provider`. The first supported adapters are `youtube`, `facebook`, and `tiktok`; each reads its own `*_UPLOAD_URL` and `*_ACCESS_TOKEN` variables and falls back to mock tracking metadata when no upload URL is configured. Publish a completed job with `POST /v1/jobs/{job_id}/uploads` and a body containing `platform`, `title`, optional `description`, and optional `privacy`.

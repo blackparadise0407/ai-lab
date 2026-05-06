@@ -42,6 +42,23 @@ export interface ProviderRequest {
   updated_at: string;
 }
 
+export type UploadPlatform = 'youtube' | 'facebook' | 'tiktok';
+
+export interface PublishUploadRequest {
+  platform: UploadPlatform;
+  title: string;
+  description: string;
+  privacy: string;
+}
+
+export interface PublishUploadResponse {
+  job_id: number;
+  platform: UploadPlatform;
+  provider_request_id: string;
+  remote_url?: string | null;
+  status: string;
+}
+
 export interface JobEventPayload {
   event: string;
   job?: Job;
