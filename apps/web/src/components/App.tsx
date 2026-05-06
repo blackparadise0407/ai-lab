@@ -71,12 +71,35 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function getJobIdFromUrl() {
+  const rawJobId = new URLSearchParams(window.location.search).get('jobId');
+  if (!rawJobId) return null;
+
+  const parsedJobId = Number(rawJobId);
+  return Number.isInteger(parsedJobId) && parsedJobId > 0 ? parsedJobId : null;
+}
+
+function setJobIdInUrl(jobId: number | null) {
+  const url = new URL(window.location.href);
+
+  if (jobId === null) {
+    url.searchParams.delete('jobId');
+  } else {
+    url.searchParams.set('jobId', String(jobId));
+  }
+
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 function App() {
   const [sourceLanguage, setSourceLanguage] = useState('zh');
   const [targetLanguage, setTargetLanguage] = useState('vi');
   const [file, setFile] = useState<File | null>(null);
-  const [jobIdInput, setJobIdInput] = useState('');
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(() => getJobIdFromUrl());
+  const [jobIdInput, setJobIdInput] = useState(() => {
+    const initialJobId = getJobIdFromUrl();
+    return initialJobId === null ? '' : String(initialJobId);
+  });
   const [formError, setFormError] = useState<string | null>(null);
   const [socketStatus, setSocketStatus] = useState<'idle' | 'connected' | 'disconnected' | 'error'>('idle');
   const queryClient = useQueryClient();
@@ -98,6 +121,21 @@ function App() {
     queryFn: () => getProviderRequests(selectedJobId!),
     enabled: selectedJobId !== null,
   });
+
+  useEffect(() => {
+    setJobIdInUrl(selectedJobId);
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const jobIdFromUrl = getJobIdFromUrl();
+      setSelectedJobId(jobIdFromUrl);
+      setJobIdInput(jobIdFromUrl === null ? '' : String(jobIdFromUrl));
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     if (selectedJobId === null) {
