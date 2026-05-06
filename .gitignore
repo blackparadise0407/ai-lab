@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local runtime state
+.env
+uploads/
+*.db
+*.sqlite

@@ -18,7 +18,7 @@ AI Lab Dubbing Pipeline is a job-based platform for turning source videos into d
 
 - `apps/core`: API backend (job creation, state tracking, callback handling)
 - `apps/worker`: asynchronous workers (transcription, translation, synthesis orchestration, muxing)
-- `apps/web`: frontend dashboard (upload, monitoring, download)
+- `apps/web`: React/Vite frontend dashboard (job creation, upload, monitoring, artifacts, provider requests)
 - `services/media`: FFmpeg and audio/video processing helpers
 - `packages/shared/schemas`: shared API and event schemas
 - `packages/shared/utils`: shared utility modules
@@ -40,6 +40,22 @@ Recommended parent job statuses:
 - `completed`
 - `failed`
 - `canceled`
+
+## Local dashboard quickstart
+
+Run the FastAPI control plane from `apps/core`, then start the React dashboard from `apps/web`:
+
+```bash
+cd apps/core
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+cd ../web
+npm install
+npm run dev
+```
+
+Open <http://localhost:5173>. Set `VITE_API_BASE_URL` when the Core API is hosted somewhere other than `http://localhost:8000`.
 
 ## Next documentation milestones
 
