@@ -1,4 +1,4 @@
-import type { Artifact, Job, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
+import type { Artifact, ConnectedAccount, Job, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -68,6 +68,27 @@ export async function getArtifacts(jobId: number) {
 export async function getProviderRequests(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/provider-requests/job/${jobId}`);
   return parseJsonResponse<ProviderRequest[]>(response);
+}
+
+export async function getConnectedAccounts(platform?: string) {
+  const searchParams = platform ? `?platform=${encodeURIComponent(platform)}` : '';
+  const response = await fetch(`${apiBaseUrl}/v1/connectors${searchParams}`);
+  return parseJsonResponse<ConnectedAccount[]>(response);
+}
+
+export function getYouTubeAuthorizeUrl() {
+  const redirectAfter = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  return `${apiBaseUrl}/v1/connectors/youtube/authorize?redirect_after=${encodeURIComponent(redirectAfter)}`;
+}
+
+export async function deleteConnectedAccount(connectedAccountId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/connectors/${connectedAccountId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const message = await getResponseErrorMessage(response);
+    throw new Error(message || `${response.status} ${response.statusText}`);
+  }
 }
 
 export async function publishJobUpload(jobId: number, payload: PublishUploadRequest) {

@@ -44,8 +44,20 @@ export interface ProviderRequest {
 
 export type UploadPlatform = 'youtube' | 'facebook' | 'tiktok';
 
+export interface ConnectedAccount {
+  id: number;
+  platform: UploadPlatform;
+  provider_account_id: string;
+  display_name: string;
+  scopes: string;
+  expires_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PublishUploadRequest {
   platform: UploadPlatform;
+  connected_account_id?: number | null;
   title: string;
   description: string;
   privacy: string;
