@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.api.job_updates import job_update_broker
 from app.db.database import get_session
-from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
-from app.providers.upload_provider import UploadProviderClient, UploadProviderError, UploadRequest
+from app.models.entities import Artifact, ConnectedAccount, Job, JobStatus, ProviderRequest, ProviderRequestStatus
+from app.providers.upload_provider import UploadCredentials, UploadProviderClient, UploadProviderError, UploadRequest
 from app.schemas.uploads import JobUploadPublishRequest, JobUploadPublishResponse
 from app.workers.video_processor import PROCESSED_ARTIFACT_TYPE
 
@@ -46,6 +47,7 @@ def publish_completed_video(
 
     video_path = Path(artifact.storage_url)
     try:
+        upload_credentials = _get_upload_credentials(session, payload)
         result = upload_provider_client.upload(
             payload.platform,
             UploadRequest(
@@ -55,6 +57,7 @@ def publish_completed_video(
                 description=payload.description,
                 privacy=payload.privacy,
             ),
+            credentials=upload_credentials,
         )
     except UploadProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -90,7 +93,7 @@ def _upsert_upload_provider_request(
         provider_request.provider_name = provider_name
         provider_request.status = ProviderRequestStatus.SUCCEEDED
         provider_request.callback_received = True
-        provider_request.updated_at = datetime.now(UTC)
+        provider_request.updated_at = datetime.now(timezone.utc)
     else:
         provider_request = ProviderRequest(
             job_id=job_id,
@@ -101,3 +104,32 @@ def _upsert_upload_provider_request(
         )
         session.add(provider_request)
     session.commit()
+
+
+def _get_upload_credentials(
+    session: Session,
+    payload: JobUploadPublishRequest,
+) -> UploadCredentials | None:
+    if payload.connected_account_id is None:
+        return None
+
+    connected_account = session.get(ConnectedAccount, payload.connected_account_id)
+    if not connected_account:
+        raise HTTPException(status_code=404, detail="Connected account not found")
+
+    platform = payload.platform.strip().lower()
+    if connected_account.platform != platform:
+        raise HTTPException(
+            status_code=400,
+            detail="Connected account platform does not match the requested upload platform",
+        )
+
+    scopes = tuple(scope for scope in connected_account.scopes.split() if scope)
+    return UploadCredentials(
+        access_token=connected_account.access_token,
+        refresh_token=connected_account.refresh_token,
+        token_uri=os.getenv("YOUTUBE_TOKEN_URI", "https://oauth2.googleapis.com/token") if platform == "youtube" else None,
+        client_id=os.getenv("YOUTUBE_CLIENT_ID") if platform == "youtube" else None,
+        client_secret=os.getenv("YOUTUBE_CLIENT_SECRET") if platform == "youtube" else None,
+        scopes=scopes,
+    )

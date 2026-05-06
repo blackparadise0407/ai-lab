@@ -8,7 +8,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -156,7 +156,7 @@ class VideoProcessingWorker:
             job.status = JobStatus.COMPLETED
             job.current_step = "done"
             job.progress_percent = 100
-            job.updated_at = datetime.now(UTC)
+            job.updated_at = datetime.now(timezone.utc)
             job.error_code = None
             job.error_message = None
             session.add(job)
@@ -517,7 +517,7 @@ class VideoProcessingWorker:
         if provider_request:
             provider_request.status = ProviderRequestStatus.SUCCEEDED
             provider_request.callback_received = True
-            provider_request.updated_at = datetime.now(UTC)
+            provider_request.updated_at = datetime.now(timezone.utc)
         else:
             provider_request = ProviderRequest(
                 job_id=job_id,
@@ -559,7 +559,7 @@ class VideoProcessingWorker:
         job.status = status
         job.current_step = step
         job.progress_percent = max(job.progress_percent, progress)
-        job.updated_at = datetime.now(UTC)
+        job.updated_at = datetime.now(timezone.utc)
         session.add(job)
         session.commit()
         job_update_broker.notify(job.id, "job_progress_updated")
@@ -573,7 +573,7 @@ class VideoProcessingWorker:
             job.current_step = "failed"
             job.error_code = error_code
             job.error_message = error_message[:1024]
-            job.updated_at = datetime.now(UTC)
+            job.updated_at = datetime.now(timezone.utc)
             session.add(job)
             session.commit()
             job_update_broker.notify(job.id, "job_failed")

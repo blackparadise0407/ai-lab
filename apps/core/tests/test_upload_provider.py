@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from app.providers.upload_provider import (
     FacebookUploadAdapter,
     TikTokUploadAdapter,
+    UploadCredentials,
     UploadProviderClient,
     UploadProviderError,
     UploadRequest,
@@ -174,6 +175,30 @@ class YouTubeUploadAdapterTests(unittest.TestCase):
         self.assertEqual(insert_kwargs["body"]["snippet"]["categoryId"], "22")
         self.assertEqual(insert_kwargs["body"]["status"]["privacyStatus"], "unlisted")
         self.assertEqual(fake_youtube.videos_resource.insert_request.calls, 1)
+
+
+    def test_uploads_with_runtime_youtube_credentials(self) -> None:
+        fake_youtube = FakeYouTubeClient({"id": "yt-runtime"})
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "dubbed.mp4"
+            video_path.write_bytes(b"video")
+
+            with patch.dict("os.environ", {}, clear=True), patch.object(
+                YouTubeUploadAdapter, "_build_youtube_client", return_value=fake_youtube
+            ) as build_client:
+                result = YouTubeUploadAdapter().upload(
+                    UploadRequest(job_id=42, video_path=video_path, title="Dubbed video"),
+                    credentials=UploadCredentials(
+                        access_token="access-token",
+                        refresh_token="refresh-token",
+                        scopes=("https://www.googleapis.com/auth/youtube.upload",),
+                    ),
+                )
+
+        self.assertEqual(result.provider_request_id, "yt-runtime")
+        passed_credentials = build_client.call_args.args[0]
+        self.assertEqual(passed_credentials.access_token, "access-token")
 
     def test_rejects_invalid_youtube_privacy_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

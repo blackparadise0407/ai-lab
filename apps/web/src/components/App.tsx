@@ -18,6 +18,7 @@ import {
 
 import type {
   Artifact,
+  ConnectedAccount,
   Job,
   JobEventPayload,
   ProviderRequest,
@@ -27,11 +28,14 @@ import type {
 import {
   apiBaseUrl,
   createJob,
+  deleteConnectedAccount,
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
+  getConnectedAccounts,
   getJob,
   getProviderRequests,
+  getYouTubeAuthorizeUrl,
   publishJobUpload,
   uploadSourceVideo,
 } from "../services/api";
@@ -163,6 +167,9 @@ function App() {
   const [publishTitle, setPublishTitle] = useState("");
   const [publishDescription, setPublishDescription] = useState("");
   const [publishPrivacy, setPublishPrivacy] = useState("private");
+  const [selectedConnectedAccountId, setSelectedConnectedAccountId] = useState<
+    number | null
+  >(null);
   const [publishResult, setPublishResult] =
     useState<PublishUploadResponse | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -187,6 +194,11 @@ function App() {
     queryKey: ["provider-requests", selectedJobId],
     queryFn: () => getProviderRequests(selectedJobId!),
     enabled: selectedJobId !== null,
+  });
+
+  const connectedAccountsQuery = useQuery({
+    queryKey: ["connected-accounts", publishPlatform],
+    queryFn: () => getConnectedAccounts(publishPlatform),
   });
 
   useEffect(() => {
@@ -279,6 +291,8 @@ function App() {
 
       return publishJobUpload(job.id, {
         platform: publishPlatform,
+        connected_account_id:
+          publishPlatform === "youtube" ? selectedConnectedAccountId : null,
         title: publishTitle.trim(),
         description: publishDescription.trim(),
         privacy: publishPrivacy.trim() || "private",
@@ -302,16 +316,21 @@ function App() {
   const job = jobQuery.data ?? null;
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
+  const connectedAccounts = connectedAccountsQuery.data ?? [];
   const isRefreshing =
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
-    providerRequestsQuery.isFetching;
+    providerRequestsQuery.isFetching ||
+    connectedAccountsQuery.isFetching;
   const isLoadingJob =
     jobQuery.isLoading ||
     artifactsQuery.isLoading ||
     providerRequestsQuery.isLoading;
   const dashboardError =
-    jobQuery.error ?? artifactsQuery.error ?? providerRequestsQuery.error;
+    jobQuery.error ??
+    artifactsQuery.error ??
+    providerRequestsQuery.error ??
+    connectedAccountsQuery.error;
   const error =
     formError ??
     (dashboardError
@@ -334,6 +353,36 @@ function App() {
     setPublishTitle(`${job.external_job_id} dubbed video`);
   }, [job, publishTitle]);
 
+  useEffect(() => {
+    if (selectedConnectedAccountId !== null) {
+      const stillExists = connectedAccounts.some(
+        (account) => account.id === selectedConnectedAccountId,
+      );
+      if (stillExists) return;
+    }
+    setSelectedConnectedAccountId(connectedAccounts[0]?.id ?? null);
+  }, [connectedAccounts, selectedConnectedAccountId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connectedAccountId = Number(params.get("youtube_connected"));
+    if (!Number.isInteger(connectedAccountId) || connectedAccountId <= 0)
+      return;
+
+    setPublishPlatform("youtube");
+    setSelectedConnectedAccountId(connectedAccountId);
+    params.delete("youtube_connected");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`,
+    );
+    void queryClient.invalidateQueries({
+      queryKey: ["connected-accounts", "youtube"],
+    });
+  }, [queryClient]);
+
   async function refreshDashboard(jobId = selectedJobId) {
     if (!jobId) return;
 
@@ -342,6 +391,9 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
       queryClient.invalidateQueries({ queryKey: ["artifacts", jobId] }),
       queryClient.invalidateQueries({ queryKey: ["provider-requests", jobId] }),
+      queryClient.invalidateQueries({
+        queryKey: ["connected-accounts", publishPlatform],
+      }),
     ]);
   }
 
@@ -360,6 +412,20 @@ function App() {
 
     setFormError(null);
     setSelectedJobId(parsedId);
+  }
+
+  function handleConnectYouTube() {
+    window.location.href = getYouTubeAuthorizeUrl();
+  }
+
+  async function handleDisconnectAccount(account: ConnectedAccount) {
+    await deleteConnectedAccount(account.id);
+    if (selectedConnectedAccountId === account.id) {
+      setSelectedConnectedAccountId(null);
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ["connected-accounts", account.platform],
+    });
   }
 
   function handlePublishUpload(event: FormEvent<HTMLFormElement>) {
@@ -662,6 +728,82 @@ function App() {
                 </button>
               ))}
             </div>
+            {publishPlatform === "youtube" && (
+              <div className="rounded-2xl border bg-slate-50 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <Label>YouTube connector</Label>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Connect a Google account with the YouTube upload scope,
+                      then choose it for this publish.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleConnectYouTube}
+                  >
+                    Connect YouTube
+                  </Button>
+                </div>
+                <div className="mt-4 grid gap-2">
+                  {connectedAccounts.length > 0 ? (
+                    connectedAccounts.map((account) => (
+                      <label
+                        key={account.id}
+                        className={cn(
+                          "flex cursor-pointer flex-col gap-3 rounded-xl border bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between",
+                          selectedConnectedAccountId === account.id &&
+                            "border-primary ring-2 ring-primary/20",
+                        )}
+                      >
+                        <span className="flex items-start gap-3">
+                          <input
+                            className="mt-1"
+                            type="radio"
+                            name="connected-youtube-account"
+                            checked={selectedConnectedAccountId === account.id}
+                            onChange={() =>
+                              setSelectedConnectedAccountId(account.id)
+                            }
+                          />
+                          <span>
+                            <strong>{account.display_name}</strong>
+                            <span className="mt-1 block break-all text-muted-foreground">
+                              Account #{account.id} · scopes:{" "}
+                              {account.scopes || "unknown"}
+                            </span>
+                            {account.expires_at && (
+                              <span className="mt-1 block text-muted-foreground">
+                                Access token expires{" "}
+                                {formatDate(account.expires_at)}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void handleDisconnectAccount(account);
+                          }}
+                        >
+                          Disconnect
+                        </Button>
+                      </label>
+                    ))
+                  ) : (
+                    <p className="rounded-xl border border-dashed bg-white p-3 text-sm text-muted-foreground">
+                      No YouTube account connected yet. Publishing can still use
+                      env credentials if configured.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
               <div className="grid gap-2">
                 <Label htmlFor="publish-title">Title</Label>
