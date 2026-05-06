@@ -5,7 +5,6 @@ import logging
 import os
 import queue
 import re
-import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -17,6 +16,7 @@ from faster_whisper import WhisperModel
 
 from app.db.database import engine
 from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
+from app.utils import run_cmd
 from app.providers.dub_provider import DubProviderClient, TtsChunkRequest
 
 PROCESSED_ARTIFACT_TYPE = "dubbed_video"
@@ -466,7 +466,7 @@ class VideoProcessingWorker:
         self._run_cmd(cmd, "TTS chunk merge failed")
 
     def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
-        subtitle_style = "PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0"
+        subtitle_style = "FontSize=14,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0"
         subtitle_filter = (
             f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
             f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
@@ -506,10 +506,7 @@ class VideoProcessingWorker:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
     def _run_cmd(self, cmd: list[str], error_message: str) -> None:
-        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if process.returncode != 0:
-            details = process.stderr.strip() or process.stdout.strip()
-            raise PipelineError(f"{error_message}: {details}")
+        run_cmd(cmd, error_message, PipelineError)
 
     def _upsert_provider_request(self, session: Session, job_id: int, provider_request_id: str) -> None:
         provider_request = session.exec(

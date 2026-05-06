@@ -5,10 +5,11 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import subprocess
 import time
 import urllib.error
 import urllib.request
+
+from app.utils import run_cmd
 
 
 class DubProviderError(RuntimeError):
@@ -185,10 +186,4 @@ class DubProviderClient:
             "pcm_s16le",
             str(output_audio),
         ]
-        self._run_cmd(cmd, "silent mock audio generation failed")
-
-    def _run_cmd(self, cmd: list[str], error_message: str) -> None:
-        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if process.returncode != 0:
-            details = process.stderr.strip() or process.stdout.strip()
-            raise DubProviderError(f"{error_message}: {details}")
+        run_cmd(cmd, "silent mock audio generation failed", DubProviderError)
