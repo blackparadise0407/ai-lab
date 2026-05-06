@@ -139,7 +139,7 @@ class VideoProcessingWorker:
             self._update_job_progress(session, job, "muxing", 85, status=JobStatus.FINALIZING)
 
         output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
-        self._mux_audio(source_video_path, tts_audio_path, output_path)
+        self._mux_audio(source_video_path, tts_audio_path, translated_srt_path, output_path)
 
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
@@ -490,7 +490,7 @@ class VideoProcessingWorker:
 
         raise PipelineError("Timed out waiting for dub provider audio")
 
-    def _mux_audio(self, source_video: Path, dubbed_audio: Path, output_video: Path) -> None:
+    def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
         cmd = [
             "ffmpeg",
             "-y",
@@ -498,18 +498,24 @@ class VideoProcessingWorker:
             str(source_video),
             "-i",
             str(dubbed_audio),
+            "-i",
+            str(subtitles),
             "-map",
             "0:v:0",
             "-map",
             "1:a:0",
+            "-map",
+            "2:0",
             "-c:v",
             "copy",
             "-c:a",
             "aac",
+            "-c:s",
+            "mov_text",
             "-shortest",
             str(output_video),
         ]
-        self._run_cmd(cmd, "audio/video muxing failed")
+        self._run_cmd(cmd, "audio/video/subtitle muxing failed")
 
     def _run_cmd(self, cmd: list[str], error_message: str) -> None:
         process = subprocess.run(cmd, capture_output=True, text=True, check=False)
