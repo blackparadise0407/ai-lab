@@ -246,7 +246,7 @@ function App() {
             AI Lab Dubbing Pipeline
           </p>
           <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
-            React dashboard for creating, tracking, and reviewing dubbing jobs.
+            AI Lab
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
             Create a pipeline job, upload source video, watch websocket status
