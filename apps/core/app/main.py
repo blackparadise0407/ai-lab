@@ -4,7 +4,8 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
-from app.api.routes import artifacts_router, jobs_router, provider_requests_router
+from app.api.origins import ALLOWED_BROWSER_ORIGINS
+from app.api.routes import artifacts_router, job_events_router, jobs_router, provider_requests_router
 from app.db.database import init_db
 from app.workers.video_processor import video_processing_worker
 
@@ -33,10 +34,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=list(ALLOWED_BROWSER_ORIGINS),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,5 +52,6 @@ def healthcheck():
 
 
 app.include_router(jobs_router)
+app.include_router(job_events_router)
 app.include_router(artifacts_router)
 app.include_router(provider_requests_router)
