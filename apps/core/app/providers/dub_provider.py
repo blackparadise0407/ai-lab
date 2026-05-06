@@ -26,23 +26,45 @@ class TtsChunkRequest:
 class DubProviderClient:
     def synthesize_chunks(self, job_id: int, chunk_requests: list[TtsChunkRequest]) -> list[str]:
         batch_size = self._get_chunk_batch_size()
+        max_attempts = self._get_chunk_max_attempts()
+        retry_delay_seconds = self._get_chunk_retry_delay_seconds()
         provider_request_ids = [""] * len(chunk_requests)
         indexed_requests = list(enumerate(chunk_requests))
         for batch_start in range(0, len(indexed_requests), batch_size):
             batch = indexed_requests[batch_start : batch_start + batch_size]
-            with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-                futures = {
-                    executor.submit(self._synthesize_chunk, job_id, chunk_request): (position, chunk_request)
-                    for position, chunk_request in batch
-                }
-                for future in as_completed(futures):
-                    position, chunk_request = futures[future]
-                    try:
-                        provider_request_ids[position] = future.result()
-                    except Exception as exc:  # noqa: BLE001
-                        raise DubProviderError(
-                            f"TTS synthesis failed for chunk {chunk_request.chunk_index}: {exc}"
-                        ) from exc
+            pending_requests = dict(batch)
+            failed_errors: dict[int, Exception] = {}
+            for attempt in range(1, max_attempts + 1):
+                failed_errors.clear()
+                with ThreadPoolExecutor(max_workers=len(pending_requests)) as executor:
+                    futures = {
+                        executor.submit(self._synthesize_chunk, job_id, chunk_request): (position, chunk_request)
+                        for position, chunk_request in pending_requests.items()
+                    }
+                    for future in as_completed(futures):
+                        position, chunk_request = futures[future]
+                        try:
+                            provider_request_ids[position] = future.result()
+                        except Exception as exc:  # noqa: BLE001
+                            failed_errors[position] = exc
+                        else:
+                            pending_requests.pop(position, None)
+
+                if not pending_requests:
+                    break
+                if attempt < max_attempts:
+                    time.sleep(retry_delay_seconds * (2 ** (attempt - 1)))
+
+            if pending_requests:
+                failed_chunks = ", ".join(
+                    f"{chunk_request.chunk_index}: {failed_errors.get(position)}"
+                    for position, chunk_request in sorted(
+                        pending_requests.items(), key=lambda item: item[1].chunk_index
+                    )
+                )
+                raise DubProviderError(
+                    f"TTS synthesis failed after {max_attempts} attempts for chunk(s) {failed_chunks}"
+                )
 
         return provider_request_ids
 
@@ -54,7 +76,9 @@ class DubProviderClient:
             self._create_silent_audio(chunk_request.output_audio, chunk_request.duration_seconds)
             return f"mock-{job_id}-{chunk_request.chunk_index}"
         if not provider_app_id or not provider_token:
-            raise DubProviderError("DUB_PROVIDER_APP_ID and DUB_PROVIDER_TOKEN are required when DUB_PROVIDER_URL is set")
+            raise DubProviderError(
+                "DUB_PROVIDER_APP_ID and DUB_PROVIDER_TOKEN are required when DUB_PROVIDER_URL is set"
+            )
 
         payload = json.dumps(
             {
@@ -98,6 +122,26 @@ class DubProviderClient:
         if batch_size < 1:
             raise DubProviderError("DUB_TTS_CHUNK_BATCH_SIZE must be at least 1")
         return batch_size
+
+    def _get_chunk_max_attempts(self) -> int:
+        raw_max_attempts = os.getenv("DUB_TTS_CHUNK_MAX_ATTEMPTS", "3")
+        try:
+            max_attempts = int(raw_max_attempts)
+        except ValueError as exc:
+            raise DubProviderError("DUB_TTS_CHUNK_MAX_ATTEMPTS must be an integer") from exc
+        if max_attempts < 1:
+            raise DubProviderError("DUB_TTS_CHUNK_MAX_ATTEMPTS must be at least 1")
+        return max_attempts
+
+    def _get_chunk_retry_delay_seconds(self) -> float:
+        raw_retry_delay = os.getenv("DUB_TTS_CHUNK_RETRY_DELAY_SECONDS", "2")
+        try:
+            retry_delay_seconds = float(raw_retry_delay)
+        except ValueError as exc:
+            raise DubProviderError("DUB_TTS_CHUNK_RETRY_DELAY_SECONDS must be a number") from exc
+        if retry_delay_seconds < 0:
+            raise DubProviderError("DUB_TTS_CHUNK_RETRY_DELAY_SECONDS must be at least 0")
+        return retry_delay_seconds
 
     def _wait_for_audio_url(self, provider_url: str, provider_request_id: str, headers: dict[str, str]) -> str:
         status_url = f"{provider_url.rstrip('/')}/{provider_request_id}"

@@ -22,6 +22,8 @@ WHISPER_MODEL=small
 WHISPER_COMPUTE_TYPE=int8
 
 DUB_TTS_CHUNK_BATCH_SIZE=5
+DUB_TTS_CHUNK_MAX_ATTEMPTS=3
+DUB_TTS_CHUNK_RETRY_DELAY_SECONDS=2
 DUB_PROVIDER_VOICE_CODE=hn_female_ngochuyen_full_48k-fhg
 DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
 DUB_PROVIDER_APP_ID=
@@ -30,7 +32,7 @@ DUB_PROVIDER_TOKEN=
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
 
-If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise SRT-timeline merging. `DUB_TTS_CHUNK_BATCH_SIZE` controls how many cues are synthesized in parallel per batch.
+If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise SRT-timeline merging. `DUB_TTS_CHUNK_BATCH_SIZE` controls how many cues are synthesized in parallel per batch. Failed chunks are retried without resynthesizing successful chunks in the same batch; configure attempts with `DUB_TTS_CHUNK_MAX_ATTEMPTS` and the initial exponential-backoff delay with `DUB_TTS_CHUNK_RETRY_DELAY_SECONDS`.
 
 `target_language` is taken from the job record (`Job.target_language`) instead of environment configuration.
 
