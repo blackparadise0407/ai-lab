@@ -1,0 +1,51 @@
+export type JobStatus =
+  | 'created'
+  | 'uploaded'
+  | 'processing'
+  | 'waiting_provider'
+  | 'finalizing'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export interface Job {
+  id: number;
+  external_job_id: string;
+  source_language: string;
+  target_language: string;
+  status: JobStatus;
+  current_step?: string | null;
+  progress_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Artifact {
+  id: number;
+  job_id: number;
+  artifact_type: string;
+  storage_url: string;
+  content_type?: string | null;
+  created_at: string;
+}
+
+export interface ProviderRequest {
+  id: number;
+  job_id: number;
+  provider_name: string;
+  provider_request_id: string;
+  status: string;
+  callback_received: boolean;
+  retry_count: number;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobEventPayload {
+  event: string;
+  job?: Job;
+  artifacts?: Artifact[];
+  provider_requests?: ProviderRequest[];
+  job_id?: number;
+}

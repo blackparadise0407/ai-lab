@@ -14,6 +14,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 from faster_whisper import WhisperModel
 
+from app.api.job_updates import job_update_broker
 from app.db.database import engine
 from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
 from app.utils import run_cmd
@@ -160,6 +161,7 @@ class VideoProcessingWorker:
             job.error_message = None
             session.add(job)
             session.commit()
+            job_update_broker.notify(job.id, "job_completed")
 
     def _extract_audio(self, source_video: Path, output_audio: Path) -> None:
         cmd = [
@@ -526,6 +528,7 @@ class VideoProcessingWorker:
             )
             session.add(provider_request)
         session.commit()
+        job_update_broker.notify(job_id, "provider_request_updated")
 
     def _upsert_artifact(self, session: Session, job_id: int, artifact_type: str, path: Path, content_type: str) -> None:
         artifact = session.exec(
@@ -559,6 +562,7 @@ class VideoProcessingWorker:
         job.updated_at = datetime.now(UTC)
         session.add(job)
         session.commit()
+        job_update_broker.notify(job.id, "job_progress_updated")
 
     def _mark_job_failed(self, job_id: int, error_code: str, error_message: str) -> None:
         with Session(engine) as session:
@@ -572,6 +576,7 @@ class VideoProcessingWorker:
             job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
+            job_update_broker.notify(job.id, "job_failed")
 
     def _seconds_to_srt_time(self, seconds: float) -> str:
         safe_seconds = max(0.0, float(seconds))

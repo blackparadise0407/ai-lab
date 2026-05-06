@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlmodel import Session, select
 
+from app.api.job_updates import job_update_broker
 from app.db.database import get_session
 from app.models.entities import Artifact, Job, JobStatus
 from app.schemas.jobs import JobCreateRequest, JobResponse
@@ -31,6 +32,7 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
     session.add(job)
     session.commit()
     session.refresh(job)
+    job_update_broker.notify(job.id, "job_created")
 
     return job
 
@@ -89,6 +91,7 @@ async def upload_source_video(
     session.commit()
     session.refresh(job)
 
+    job_update_broker.notify(job.id, "source_video_uploaded")
     video_processing_worker.enqueue(job_id=job.id)
     return job
 
