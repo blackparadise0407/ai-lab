@@ -210,11 +210,11 @@ class VideoProcessingWorker:
         if not blocks:
             return srt_text
 
-        translated_texts = self._translate_lines_with_openai(
+        translated_texts = self._translate_cues_with_openai(
             openai_api_key=openai_api_key,
             model=model,
             target_language=target_language,
-            lines=[block[2] for block in blocks],
+            cues=self._build_translation_cues(blocks),
         )
 
         rebuilt_blocks = []
@@ -240,13 +240,28 @@ class VideoProcessingWorker:
             blocks.append((sequence, timing, text))
         return blocks
 
-    def _translate_lines_with_openai(
+    def _build_translation_cues(self, blocks: list[tuple[str, str, str]]) -> list[dict[str, object]]:
+        cues: list[dict[str, object]] = []
+        for index, (_sequence, timing, text) in enumerate(blocks):
+            start_time, end_time = self._parse_srt_timing_range(timing)
+            duration_seconds = max(0.0, end_time - start_time)
+            cues.append(
+                {
+                    "index": index,
+                    "timing": timing,
+                    "duration_seconds": round(duration_seconds, 3),
+                    "text": text,
+                }
+            )
+        return cues
+
+    def _translate_cues_with_openai(
         self,
         *,
         openai_api_key: str,
         model: str,
         target_language: str,
-        lines: list[str],
+        cues: list[dict[str, object]],
     ) -> list[str]:
         payload = {
             "model": model,
@@ -258,24 +273,27 @@ class VideoProcessingWorker:
                             "type": "input_text",
                             "text": (
                                 "You are a professional subtitle translator and dubbing editor. "
-                                f"Translate every string in the input JSON array into {target_language}. "
+                                f"Translate the `text` field of every SRT cue object into {target_language}. "
+                                "Each cue includes `timing` and `duration_seconds`; use them to make the translation fit the subtitle window. "
                                 "Rules you MUST follow, in priority order:\n"
                                 "1. Return ONLY a JSON array of strings — no markdown, no extra keys, no prose.\n"
                                 "2. The output array MUST contain exactly the same number of elements as the input array.\n"
-                                "3. Element at index N in the output is the translation of element at index N in the input — never merge, split, reorder, or omit elements.\n"
-                                "4. DURATION MATCHING (highest priority): Each translated string must have approximately the same spoken duration as its source string. "
-                                "Prefer shorter synonyms, contractions, or natural ellipsis over word-for-word accuracy when necessary to match length. "
-                                "Aim for the syllable count to be within ±15% of the original.\n"
-                                "5. NATURALNESS: Within the duration constraint, use fluent, idiomatic phrasing native to the target language — avoid literal word-for-word translation that sounds unnatural.\n"
-                                "6. Preserve the original meaning and emotional tone as closely as possible given constraints 4 and 5.\n"
-                                "7. If a line cannot be translated (e.g. it is already in the target language), copy it verbatim."
+                                "3. Element at index N in the output is the translation for cue index N — never merge, split, reorder, or omit cues.\n"
+                                "4. TIMESTAMP FIT (highest priority): Each translation must be short enough to be spoken naturally inside that cue's `duration_seconds` SRT timestamp window. "
+                                "For very short cues, use concise phrasing; for longer cues, keep the full thought but avoid unnecessary padding. "
+                                "Prefer shorter synonyms, contractions, pronouns, or natural ellipsis over literal wording when needed to fit.\n"
+                                f"5. NATURALNESS AND COHERENCE: Within the timestamp fit constraint, write fluent, idiomatic {target_language} with a natural spoken tone. "
+                                "Use nearby cues as context so pronouns, formality, and transitions remain coherent, but keep each cue self-contained.\n"
+                                "6. Preserve the original meaning, intent, and emotional tone as closely as possible given constraints 4 and 5.\n"
+                                "7. Do not add explanations, speaker labels, parentheticals, or content that was not implied by the source.\n"
+                                "8. If a cue cannot be translated (e.g. it is already in the target language), copy its text verbatim."
                             ),
                         }
                     ],
                 },
                 {
                     "role": "user",
-                    "content": [{"type": "input_text", "text": json.dumps(lines, ensure_ascii=False)}],
+                    "content": [{"type": "input_text", "text": json.dumps(cues, ensure_ascii=False)}],
                 },
             ],
         }
@@ -299,7 +317,7 @@ class VideoProcessingWorker:
         if not translated_raw:
             raise PipelineError("OpenAI translation returned empty output_text")
 
-        translated = self._parse_openai_translations(translated_raw, expected_count=len(lines))
+        translated = self._parse_openai_translations(translated_raw, expected_count=len(cues))
         if translated is None:
             raise PipelineError("OpenAI translation output was not valid JSON")
 
