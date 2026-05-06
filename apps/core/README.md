@@ -20,12 +20,14 @@ OPENAI_TRANSLATION_MODEL=gpt-4.1-mini
 # Optional pipeline settings
 WHISPER_MODEL=small
 WHISPER_COMPUTE_TYPE=int8
-DUB_PROVIDER_URL=
+DUB_PROVIDER_VOICE_CODE=hn_female_ngochuyen_full_48k-fhg
 DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
 DUB_PROVIDER_APP_ID=
 DUB_PROVIDER_TOKEN=
 ```
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
+
+If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise SRT-timeline merging.
 
 `target_language` is taken from the job record (`Job.target_language`) instead of environment configuration.

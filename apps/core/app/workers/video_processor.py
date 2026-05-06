@@ -119,20 +119,21 @@ class VideoProcessingWorker:
         translated_srt_path = job_work_dir / "translated.srt"
         translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
 
-        ssml_text = self._compile_ssml(translated_srt_text)
-        ssml_path = job_work_dir / "dub.ssml"
-        ssml_path.write_text(ssml_text, encoding="utf-8")
-
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
-            self._update_job_progress(session, job, "waiting_provider", 65, status=JobStatus.WAITING_PROVIDER)
+            self._update_job_progress(session, job, "synthesizing_chunks", 65, status=JobStatus.WAITING_PROVIDER)
 
-        tts_audio_path, provider_request_id = self._submit_dub_request(job_id, ssml_text, job_work_dir)
+        tts_audio_path, provider_request_ids = self._synthesize_dubbed_audio_from_srt(
+            job_id,
+            translated_srt_text,
+            job_work_dir,
+        )
 
         with Session(engine) as session:
-            self._upsert_provider_request(session, job_id, provider_request_id)
+            for provider_request_id in provider_request_ids:
+                self._upsert_provider_request(session, job_id, provider_request_id)
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
@@ -381,40 +382,6 @@ class VideoProcessingWorker:
 
         return "\n".join(text_chunks).strip()
 
-    def _compile_ssml(self, translated_srt: str) -> str:
-        blocks = self._parse_srt_blocks(translated_srt)
-        if not blocks:
-            return "No text"
-
-        spoken_blocks: list[tuple[float, float, str]] = []
-        for _sequence, timing, text in blocks:
-            escaped_text = self._escape_ssml(text).strip()
-            if not escaped_text:
-                continue
-            start_time, end_time = self._parse_srt_timing_range(timing)
-            spoken_blocks.append((start_time, end_time, escaped_text))
-
-        if not spoken_blocks:
-            return "No text"
-
-        parts: list[str] = []
-        for idx, (_start_time, end_time, text) in enumerate(spoken_blocks):
-            parts.append(text)
-            if idx >= len(spoken_blocks) - 1:
-                continue
-
-            next_start_time, _, next_text = spoken_blocks[idx + 1]
-            pause_seconds = max(0.0, next_start_time - end_time)
-            rounded_pause_seconds = round(pause_seconds, 3)
-            if rounded_pause_seconds >= 0.25:
-                parts.append(f"<break time={rounded_pause_seconds:.2f}s/>")
-            elif next_text and next_text[0].isupper():
-                parts.append(". ")
-            else:
-                parts.append(", ")
-
-        return "".join(parts).strip() or "No text"
-
     def _parse_srt_timing_range(self, timing: str) -> tuple[float, float]:
         start_raw, end_raw = [part.strip() for part in timing.split("-->", maxsplit=1)]
         return self._parse_srt_time(start_raw), self._parse_srt_time(end_raw)
@@ -430,24 +397,61 @@ class VideoProcessingWorker:
         )
         return total_seconds
 
-    def _submit_dub_request(self, job_id: int, ssml: str, job_work_dir: Path) -> tuple[Path, str]:
+    def _synthesize_dubbed_audio_from_srt(
+        self, job_id: int, translated_srt: str, job_work_dir: Path
+    ) -> tuple[Path, list[str]]:
+        blocks = self._parse_srt_blocks(translated_srt)
+        if not blocks:
+            raise PipelineError("Translated SRT has no usable subtitle blocks for chunked synthesis")
+
+        chunks_dir = job_work_dir / "tts_chunks"
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+        chunk_specs: list[tuple[float, float, Path]] = []
+        provider_request_ids: list[str] = []
+        for chunk_index, (_sequence, timing, text) in enumerate(blocks, start=1):
+            start_time, end_time = self._parse_srt_timing_range(timing)
+            if end_time < start_time:
+                raise PipelineError(f"Invalid SRT timing range: {timing}")
+            chunk_audio_path = chunks_dir / f"chunk_{chunk_index:04}.wav"
+            provider_request_id = self._submit_tts_chunk(
+                job_id=job_id,
+                chunk_index=chunk_index,
+                text=text,
+                output_audio=chunk_audio_path,
+                duration_seconds=max(0.1, end_time - start_time),
+            )
+            provider_request_ids.append(provider_request_id)
+            chunk_specs.append((start_time, end_time, chunk_audio_path))
+
+        output_audio = job_work_dir / "dubbed.wav"
+        self._merge_tts_chunks(chunk_specs, output_audio)
+        return output_audio, provider_request_ids
+
+    def _submit_tts_chunk(
+        self,
+        *,
+        job_id: int,
+        chunk_index: int,
+        text: str,
+        output_audio: Path,
+        duration_seconds: float,
+    ) -> str:
         provider_url = os.getenv("DUB_PROVIDER_URL")
         provider_app_id = os.getenv("DUB_PROVIDER_APP_ID")
         provider_token = os.getenv("DUB_PROVIDER_TOKEN")
-        output_audio = job_work_dir / "dubbed.wav"
         if not provider_url:
-            output_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
-            return output_audio, f"mock-{job_id}"
+            self._create_silent_audio(output_audio, duration_seconds)
+            return f"mock-{job_id}-{chunk_index}"
         if not provider_app_id or not provider_token:
             raise PipelineError("DUB_PROVIDER_APP_ID and DUB_PROVIDER_TOKEN are required when DUB_PROVIDER_URL is set")
 
         payload = json.dumps(
             {
                 "app_id": provider_app_id,
-                "input_text": ssml,
+                "input_text": text,
                 "audio_type": "wav",
                 "response_type": "direct",
-                "voice_code": "hn_female_ngochuyen_full_48k-fhg",
+                "voice_code": os.getenv("DUB_PROVIDER_VOICE_CODE", "hn_female_ngochuyen_full_48k-fhg"),
             }
         ).encode("utf-8")
         headers = {
@@ -464,12 +468,65 @@ class VideoProcessingWorker:
             with urllib.request.urlopen(create_request, timeout=60) as response:  # noqa: S310
                 create_response_data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise PipelineError(f"Dub provider request failed: {exc}") from exc
+            raise PipelineError(f"Dub provider request failed for chunk {chunk_index}: {exc}") from exc
 
-        provider_request_id = str(create_response_data.get("result", {}).get("request_id") or f"provider-{job_id}")
+        provider_request_id = str(
+            create_response_data.get("result", {}).get("request_id") or f"provider-{job_id}-{chunk_index}"
+        )
         audio_url = self._wait_for_audio_url(provider_url, provider_request_id, headers)
         self._download_file(audio_url, output_audio)
-        return output_audio, provider_request_id
+        return provider_request_id
+
+    def _merge_tts_chunks(self, chunk_specs: list[tuple[float, float, Path]], output_audio: Path) -> None:
+        if not chunk_specs:
+            raise PipelineError("No TTS chunks were generated")
+
+        cmd = ["ffmpeg", "-y"]
+        filter_parts: list[str] = []
+        mixed_labels: list[str] = []
+        for input_index, (start_time, _end_time, chunk_path) in enumerate(chunk_specs):
+            cmd.extend(["-i", str(chunk_path)])
+            delay_ms = int(round(max(0.0, start_time) * 1000))
+            delayed_label = f"a{input_index}"
+            filter_parts.append(f"[{input_index}:a]adelay={delay_ms}:all=1[{delayed_label}]")
+            mixed_labels.append(f"[{delayed_label}]")
+
+        if len(mixed_labels) == 1:
+            filter_parts.append(f"{mixed_labels[0]}aresample=48000[aout]")
+        else:
+            filter_parts.append(
+                "".join(mixed_labels)
+                + f"amix=inputs={len(mixed_labels)}:duration=longest:dropout_transition=0,aresample=48000[aout]"
+            )
+
+        cmd.extend(
+            [
+                "-filter_complex",
+                ";".join(filter_parts),
+                "-map",
+                "[aout]",
+                "-c:a",
+                "pcm_s16le",
+                str(output_audio),
+            ]
+        )
+        self._run_cmd(cmd, "TTS chunk merge failed")
+
+    def _create_silent_audio(self, output_audio: Path, duration_seconds: float) -> None:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=channel_layout=mono:sample_rate=48000",
+            "-t",
+            f"{max(0.1, duration_seconds):.3f}",
+            "-c:a",
+            "pcm_s16le",
+            str(output_audio),
+        ]
+        self._run_cmd(cmd, "silent mock audio generation failed")
 
     def _wait_for_audio_url(self, provider_url: str, provider_request_id: str, headers: dict[str, str]) -> str:
         status_url = f"{provider_url.rstrip('/')}/{provider_request_id}"
@@ -609,9 +666,6 @@ class VideoProcessingWorker:
             job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
-
-    def _escape_ssml(self, text: str) -> str:
-        return re.sub(r"[<>&\"]", lambda m: {"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"}[m.group(0)], text)
 
     def _seconds_to_srt_time(self, seconds: float) -> str:
         safe_seconds = max(0.0, float(seconds))
