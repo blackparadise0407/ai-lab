@@ -493,6 +493,11 @@ class VideoProcessingWorker:
         raise PipelineError("Timed out waiting for dub provider audio")
 
     def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
+        subtitle_style = "PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0"
+        subtitle_filter = (
+            f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
+            f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
+        )
         cmd = [
             "ffmpeg",
             "-y",
@@ -500,24 +505,32 @@ class VideoProcessingWorker:
             str(source_video),
             "-i",
             str(dubbed_audio),
-            "-i",
-            str(subtitles),
             "-map",
             "0:v:0",
             "-map",
             "1:a:0",
-            "-map",
-            "2:0",
+            "-vf",
+            subtitle_filter,
             "-c:v",
-            "copy",
+            "libx264",
+            "-crf",
+            "18",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
             "-c:a",
             "aac",
-            "-c:s",
-            "mov_text",
             "-shortest",
             str(output_video),
         ]
-        self._run_cmd(cmd, "audio/video/subtitle muxing failed")
+        self._run_cmd(cmd, "audio/video/subtitle burn-in failed")
+
+    def _escape_ffmpeg_filter_path(self, path: Path) -> str:
+        return "'" + str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:") + "'"
+
+    def _escape_ffmpeg_filter_value(self, value: str) -> str:
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
     def _run_cmd(self, cmd: list[str], error_message: str) -> None:
         process = subprocess.run(cmd, capture_output=True, text=True, check=False)
