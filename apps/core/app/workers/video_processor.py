@@ -537,7 +537,7 @@ class VideoProcessingWorker:
         return duration_seconds
 
     def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
-        subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0"
+        subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=70"
         subtitle_filter = (
             f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
             f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
