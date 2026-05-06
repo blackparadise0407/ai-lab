@@ -31,6 +31,16 @@ class UploadRequest:
 
 
 @dataclass(frozen=True)
+class UploadCredentials:
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_uri: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    scopes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class UploadResult:
     platform: str
     provider_request_id: str
@@ -43,7 +53,7 @@ class UploadProviderAdapter(ABC):
     platform: str
 
     @abstractmethod
-    def upload(self, request: UploadRequest) -> UploadResult:
+    def upload(self, request: UploadRequest, credentials: UploadCredentials | None = None) -> UploadResult:
         """Upload a rendered video and return provider tracking metadata."""
 
 
@@ -54,7 +64,7 @@ class HttpUploadProviderAdapter(UploadProviderAdapter):
     env_prefix: str
     file_field_name = "video"
 
-    def upload(self, request: UploadRequest) -> UploadResult:
+    def upload(self, request: UploadRequest, credentials: UploadCredentials | None = None) -> UploadResult:
         if not request.video_path.exists():
             raise UploadProviderError(f"Upload source video does not exist: {request.video_path}")
 
@@ -62,7 +72,7 @@ class HttpUploadProviderAdapter(UploadProviderAdapter):
         if not upload_url:
             return self._mock_upload(request)
 
-        access_token = os.getenv(f"{self.env_prefix}_ACCESS_TOKEN")
+        access_token = credentials.access_token if credentials else os.getenv(f"{self.env_prefix}_ACCESS_TOKEN")
         if not access_token:
             raise UploadProviderError(
                 f"{self.env_prefix}_ACCESS_TOKEN is required when {self.env_prefix}_UPLOAD_URL is set"
@@ -154,10 +164,10 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
         http.client.BadStatusLine,
     )
 
-    def upload(self, request: UploadRequest) -> UploadResult:
+    def upload(self, request: UploadRequest, credentials: UploadCredentials | None = None) -> UploadResult:
         if not request.video_path.exists():
             raise UploadProviderError(f"Upload source video does not exist: {request.video_path}")
-        if not self._is_configured():
+        if not self._is_configured(credentials):
             return UploadResult(
                 platform=self.platform,
                 provider_request_id=f"mock-{self.platform}-{request.job_id}",
@@ -165,7 +175,7 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
             )
 
         privacy_status = self._validate_privacy_status(request.privacy)
-        youtube = self._build_youtube_client()
+        youtube = self._build_youtube_client(credentials)
         response = self._upload_video(youtube, request, privacy_status)
         video_id = response.get("id")
         if not video_id:
@@ -177,7 +187,10 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
             remote_url=f"https://www.youtube.com/watch?v={video_id}",
         )
 
-    def _is_configured(self) -> bool:
+    def _is_configured(self, credentials: UploadCredentials | None = None) -> bool:
+        if credentials and credentials.access_token:
+            return True
+
         configured_values = [
             os.getenv("YOUTUBE_CLIENT_ID"),
             os.getenv("YOUTUBE_CLIENT_SECRET"),
@@ -187,7 +200,7 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
             return False
         if not all(configured_values):
             raise UploadProviderError(
-                "YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, and YOUTUBE_REFRESH_TOKEN are required for YouTube uploads"
+                "YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, and YOUTUBE_REFRESH_TOKEN are required for env-based YouTube uploads"
             )
         return True
 
@@ -198,15 +211,26 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
             raise UploadProviderError(f"YouTube privacy must be one of: {valid_values}")
         return privacy_status
 
-    def _build_youtube_client(self):
-        credentials = Credentials(
-            token=None,
-            refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],
-            token_uri=os.getenv("YOUTUBE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
-            client_id=os.environ["YOUTUBE_CLIENT_ID"],
-            client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
-            scopes=["https://www.googleapis.com/auth/youtube.upload"],
-        )
+    def _build_youtube_client(self, upload_credentials: UploadCredentials | None = None):
+        scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+        if upload_credentials and upload_credentials.access_token:
+            credentials = Credentials(
+                token=upload_credentials.access_token,
+                refresh_token=upload_credentials.refresh_token,
+                token_uri=upload_credentials.token_uri or os.getenv("YOUTUBE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+                client_id=upload_credentials.client_id or os.getenv("YOUTUBE_CLIENT_ID"),
+                client_secret=upload_credentials.client_secret or os.getenv("YOUTUBE_CLIENT_SECRET"),
+                scopes=list(upload_credentials.scopes or tuple(scopes)),
+            )
+        else:
+            credentials = Credentials(
+                token=None,
+                refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],
+                token_uri=os.getenv("YOUTUBE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+                client_id=os.environ["YOUTUBE_CLIENT_ID"],
+                client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
+                scopes=scopes,
+            )
         return build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
     def _upload_video(self, youtube, request: UploadRequest, privacy_status: str) -> dict[str, Any]:
@@ -308,7 +332,12 @@ class UploadProviderClient:
     def supported_platforms(self) -> tuple[str, ...]:
         return tuple(self._adapters.keys())
 
-    def upload(self, platform: str, request: UploadRequest) -> UploadResult:
+    def upload(
+        self,
+        platform: str,
+        request: UploadRequest,
+        credentials: UploadCredentials | None = None,
+    ) -> UploadResult:
         normalized_platform = platform.strip().lower()
         adapter = self._adapters.get(normalized_platform)
         if not adapter:
@@ -316,4 +345,4 @@ class UploadProviderClient:
             raise UploadProviderError(
                 f"Unsupported upload platform '{platform}'. Supported platforms: {supported}"
             )
-        return adapter.upload(request)
+        return adapter.upload(request, credentials=credentials)

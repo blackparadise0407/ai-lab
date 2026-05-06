@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 
 class JobUploadPublishRequest(BaseModel):
     platform: str = Field(..., min_length=2, max_length=32, description="Upload platform key")
+    connected_account_id: Optional[int] = Field(
+        default=None,
+        description="Optional connected account ID returned by /v1/connectors",
+    )
     title: str = Field(..., min_length=1, max_length=150)
     description: str = Field(default="", max_length=5000)
     privacy: str = Field(default="private", min_length=3, max_length=32)
