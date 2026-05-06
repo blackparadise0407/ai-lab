@@ -1,6 +1,20 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Download, ExternalLink, Loader2, Plug, PlugZap, RefreshCw } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  AlertCircle,
+  Download,
+  ExternalLink,
+  Loader2,
+  Plug,
+  PlugZap,
+  RefreshCw,
+} from "lucide-react";
 
 import type {
   Artifact,
@@ -9,7 +23,7 @@ import type {
   ProviderRequest,
   PublishUploadResponse,
   UploadPlatform,
-} from '../interfaces/job';
+} from "../interfaces/job";
 import {
   apiBaseUrl,
   createJob,
@@ -80,12 +94,6 @@ const uploadPlatformOptions: {
   },
 ];
 
-const uploadPlatformOptions: { value: UploadPlatform; label: string; description: string }[] = [
-  { value: 'youtube', label: 'YouTube', description: 'Publish with the YouTube upload adapter.' },
-  { value: 'facebook', label: 'Facebook', description: 'Publish with the Facebook video adapter.' },
-  { value: 'tiktok', label: 'TikTok', description: 'Publish with the TikTok video adapter.' },
-];
-
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -150,13 +158,17 @@ function App() {
     return initialJobId === null ? "" : String(initialJobId);
   });
   const [formError, setFormError] = useState<string | null>(null);
-  const [publishPlatform, setPublishPlatform] = useState<UploadPlatform>('youtube');
-  const [publishTitle, setPublishTitle] = useState('');
-  const [publishDescription, setPublishDescription] = useState('');
-  const [publishPrivacy, setPublishPrivacy] = useState('private');
-  const [publishResult, setPublishResult] = useState<PublishUploadResponse | null>(null);
+  const [publishPlatform, setPublishPlatform] =
+    useState<UploadPlatform>("youtube");
+  const [publishTitle, setPublishTitle] = useState("");
+  const [publishDescription, setPublishDescription] = useState("");
+  const [publishPrivacy, setPublishPrivacy] = useState("private");
+  const [publishResult, setPublishResult] =
+    useState<PublishUploadResponse | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [socketStatus, setSocketStatus] = useState<'idle' | 'connected' | 'disconnected' | 'error'>('idle');
+  const [socketStatus, setSocketStatus] = useState<
+    "idle" | "connected" | "disconnected" | "error"
+  >("idle");
   const queryClient = useQueryClient();
 
   const jobQuery = useQuery({
@@ -223,9 +235,9 @@ function App() {
   }, [queryClient, selectedJobId]);
 
   useEffect(() => {
-    setPublishTitle('');
-    setPublishDescription('');
-    setPublishPrivacy('private');
+    setPublishTitle("");
+    setPublishDescription("");
+    setPublishPrivacy("private");
     setPublishResult(null);
     setPublishError(null);
   }, [selectedJobId]);
@@ -284,36 +296,6 @@ function App() {
       setPublishError(
         getErrorMessage(error, "Unable to publish the completed video."),
       );
-    },
-  });
-
-  const publishUploadMutation = useMutation({
-    mutationFn: async () => {
-      if (!job) {
-        throw new Error('Load a completed job before publishing.');
-      }
-      if (job.status !== 'completed') {
-        throw new Error('Job must be completed before publishing.');
-      }
-      if (!publishTitle.trim()) {
-        throw new Error('Enter a publish title.');
-      }
-
-      return publishJobUpload(job.id, {
-        platform: publishPlatform,
-        title: publishTitle.trim(),
-        description: publishDescription.trim(),
-        privacy: publishPrivacy.trim() || 'private',
-      });
-    },
-    onSuccess: async (result) => {
-      setPublishError(null);
-      setPublishResult(result);
-      await queryClient.invalidateQueries({ queryKey: ['provider-requests', result.job_id] });
-    },
-    onError: (error) => {
-      setPublishResult(null);
-      setPublishError(getErrorMessage(error, 'Unable to publish the completed video.'));
     },
   });
 
@@ -637,18 +619,22 @@ function App() {
         </CardContent>
       </Card>
 
-
       <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">Publish</CardDescription>
-            <CardTitle className="mt-2 text-2xl">Upload completed video</CardTitle>
+            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
+              Publish
+            </CardDescription>
+            <CardTitle className="mt-2 text-2xl">
+              Upload completed video
+            </CardTitle>
             <CardDescription>
-              Send the completed dubbed artifact to YouTube, Facebook, or TikTok through the Core API upload adapter.
+              Send the completed dubbed artifact to YouTube, Facebook, or TikTok
+              through the Core API upload adapter.
             </CardDescription>
           </div>
           <CardAction>
-            {job?.status === 'completed' ? (
+            {job?.status === "completed" ? (
               <Badge className="bg-emerald-100 text-emerald-700">Ready</Badge>
             ) : (
               <Badge variant="secondary">Waiting for completed job</Badge>
@@ -663,13 +649,16 @@ function App() {
                   key={platform.value}
                   type="button"
                   className={cn(
-                    'rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5',
-                    publishPlatform === platform.value && 'border-primary bg-primary/10 ring-2 ring-primary/20',
+                    "rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                    publishPlatform === platform.value &&
+                      "border-primary bg-primary/10 ring-2 ring-primary/20",
                   )}
                   onClick={() => setPublishPlatform(platform.value)}
                 >
                   <span className="font-black">{platform.label}</span>
-                  <span className="mt-1 block text-sm text-muted-foreground">{platform.description}</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    {platform.description}
+                  </span>
                 </button>
               ))}
             </div>
@@ -705,11 +694,17 @@ function App() {
                 onChange={(event) => setPublishDescription(event.target.value)}
               />
             </div>
-            {publishError && <p className="text-sm font-medium text-destructive">{publishError}</p>}
+            {publishError && (
+              <p className="text-sm font-medium text-destructive">
+                {publishError}
+              </p>
+            )}
             {publishResult && (
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
                 <strong>Published to {publishResult.platform}.</strong>
-                <p className="mt-1 break-all">Provider request: {publishResult.provider_request_id}</p>
+                <p className="mt-1 break-all">
+                  Provider request: {publishResult.provider_request_id}
+                </p>
                 {publishResult.remote_url && (
                   <a
                     className="mt-2 inline-flex items-center gap-2 font-bold text-emerald-800 underline"
@@ -726,11 +721,17 @@ function App() {
             <Button
               type="submit"
               size="lg"
-              disabled={!finalDubbedVideo || job?.status !== 'completed' || publishUploadMutation.isPending}
+              disabled={
+                !finalDubbedVideo ||
+                job?.status !== "completed" ||
+                publishUploadMutation.isPending
+              }
             >
-              {publishUploadMutation.isPending && <Loader2 className="animate-spin" />}
+              {publishUploadMutation.isPending && (
+                <Loader2 className="animate-spin" />
+              )}
               {publishUploadMutation.isPending
-                ? 'Publishing…'
+                ? "Publishing…"
                 : `Publish to ${uploadPlatformOptions.find((platform) => platform.value === publishPlatform)?.label}`}
             </Button>
           </form>
