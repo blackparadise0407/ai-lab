@@ -403,13 +403,15 @@ class VideoProcessingWorker:
             if idx >= len(spoken_blocks) - 1:
                 continue
 
-            next_start_time = spoken_blocks[idx + 1][0]
+            next_start_time, _, next_text = spoken_blocks[idx + 1]
             pause_seconds = max(0.0, next_start_time - end_time)
             rounded_pause_seconds = round(pause_seconds, 3)
-            if rounded_pause_seconds >= 0.01:
+            if rounded_pause_seconds >= 0.25:
                 parts.append(f"<break time={rounded_pause_seconds:.2f}s/>")
+            elif next_text and next_text[0].isupper():
+                parts.append(". ")
             else:
-                parts.append(" ")
+                parts.append(", ")
 
         return "".join(parts).strip() or "No text"
 

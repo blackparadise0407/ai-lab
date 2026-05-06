@@ -21,6 +21,9 @@ OPENAI_TRANSLATION_MODEL=gpt-4.1-mini
 WHISPER_MODEL=small
 WHISPER_COMPUTE_TYPE=int8
 DUB_PROVIDER_URL=
+DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
+DUB_PROVIDER_APP_ID=
+DUB_PROVIDER_TOKEN=
 ```
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
