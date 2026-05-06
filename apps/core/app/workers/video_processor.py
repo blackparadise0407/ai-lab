@@ -7,6 +7,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -405,8 +406,8 @@ class VideoProcessingWorker:
             next_start_time = spoken_blocks[idx + 1][0]
             pause_seconds = max(0.0, next_start_time - end_time)
             rounded_pause_seconds = round(pause_seconds, 3)
-            if rounded_pause_seconds >= 0.001:
-                parts.append(f"<break time=\"{rounded_pause_seconds:.3f}s\"/>")
+            if rounded_pause_seconds >= 0.01:
+                parts.append(f"<break time={rounded_pause_seconds:.2f}s/>")
             else:
                 parts.append(" ")
 
@@ -429,31 +430,65 @@ class VideoProcessingWorker:
 
     def _submit_dub_request(self, job_id: int, ssml: str, job_work_dir: Path) -> tuple[Path, str]:
         provider_url = os.getenv("DUB_PROVIDER_URL")
+        provider_app_id = os.getenv("DUB_PROVIDER_APP_ID")
+        provider_token = os.getenv("DUB_PROVIDER_TOKEN")
         output_audio = job_work_dir / "dubbed.wav"
         if not provider_url:
             output_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
             return output_audio, f"mock-{job_id}"
+        if not provider_app_id or not provider_token:
+            raise PipelineError("DUB_PROVIDER_APP_ID and DUB_PROVIDER_TOKEN are required when DUB_PROVIDER_URL is set")
 
-        payload = json.dumps({"job_id": job_id, "ssml": ssml}).encode("utf-8")
-        request = urllib.request.Request(
+        payload = json.dumps(
+            {
+                "app_id": provider_app_id,
+                "input_text": ssml,
+                "audio_type": "wav",
+                "response_type": "direct",
+                "voice_code": "hn_female_ngochuyen_full_48k-fhg",
+            }
+        ).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {provider_token}",
+        }
+        create_request = urllib.request.Request(
             provider_url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
-                response_data = json.loads(response.read().decode("utf-8"))
+            with urllib.request.urlopen(create_request, timeout=60) as response:  # noqa: S310
+                create_response_data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise PipelineError(f"Dub provider request failed: {exc}") from exc
 
-        audio_url = response_data.get("audio_url")
-        provider_request_id = response_data.get("request_id", f"provider-{job_id}")
-        if not audio_url:
-            raise PipelineError("Dub provider did not return audio_url")
-
+        provider_request_id = str(create_response_data.get("result", {}).get("request_id") or f"provider-{job_id}")
+        audio_url = self._wait_for_audio_url(provider_url, provider_request_id, headers)
         self._download_file(audio_url, output_audio)
-        return output_audio, str(provider_request_id)
+        return output_audio, provider_request_id
+
+    def _wait_for_audio_url(self, provider_url: str, provider_request_id: str, headers: dict[str, str]) -> str:
+        status_url = f"{provider_url.rstrip('/')}/{provider_request_id}"
+        for _ in range(30):
+            request = urllib.request.Request(status_url, headers=headers, method="GET")
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                    status_response_data = json.loads(response.read().decode("utf-8"))
+            except urllib.error.URLError as exc:
+                raise PipelineError(f"Dub provider status check failed: {exc}") from exc
+
+            result = status_response_data.get("result", {})
+            request_status = result.get("status")
+            audio_url = result.get("audio_link")
+            if request_status == "SUCCESS" and audio_url:
+                return str(audio_url)
+            if request_status == "FAILURE":
+                raise PipelineError("Dub provider synthesis request failed")
+            time.sleep(2)
+
+        raise PipelineError("Timed out waiting for dub provider audio")
 
     def _mux_audio(self, source_video: Path, dubbed_audio: Path, output_video: Path) -> None:
         cmd = [
