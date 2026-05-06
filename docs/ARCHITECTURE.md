@@ -24,13 +24,14 @@ Responsibilities:
 - Delegate TTS provider requests to provider-client adapters and handle retry/backoff orchestration.
 - Perform final media assembly and publish outputs.
 
-### `apps/web` (dashboard)
+### `apps/web` (React dashboard)
 
 Responsibilities:
-- Upload videos and create jobs.
-- Display per-job status/progress.
-- Surface errors and retry actions.
-- Download/view final artifacts.
+- Provide a client-rendered React/Vite dashboard; no SSR or Next.js runtime is required.
+- Create jobs and upload source videos through the Core API.
+- Load existing jobs by numeric ID and poll active jobs every five seconds.
+- Display per-job status/progress, current pipeline step, provider requests, and generated artifacts.
+- Surface request errors from the Core API so operators can retry manually.
 
 ### `services/media`
 
@@ -89,8 +90,12 @@ Terminal states:
 
 - `apps/core`: API entrypoint, provider clients, and orchestration control plane.
 - `apps/worker`: asynchronous compute plane.
-- `apps/web`: user-facing interface.
+- `apps/web`: client-rendered React/Vite user-facing dashboard.
 - `services/media`: media toolchain abstraction.
 - `packages/shared/*`: cross-service contracts/utilities.
 - `infra/*`: deployment/runtime configuration.
 - `scripts`: developer and operations utilities.
+
+## 7) Frontend dashboard runtime
+
+The dashboard is a static React app built with Vite. In local development it runs on `http://localhost:5173` and calls the Core API at `http://localhost:8000` unless `VITE_API_BASE_URL` is provided. The Core API enables CORS for the local Vite origins so browser-based job creation, video upload, polling, artifact inspection, and provider-request inspection work without a reverse proxy.
