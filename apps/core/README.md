@@ -40,7 +40,6 @@ PUBLIC_API_BASE_URL=http://localhost:8000
 # Optional legacy single-account fallback for uploads without connected_account_id.
 YOUTUBE_REFRESH_TOKEN=
 YOUTUBE_TOKEN_URI=https://oauth2.googleapis.com/token
-YOUTUBE_CATEGORY_ID=22
 YOUTUBE_TAGS=
 YOUTUBE_UPLOAD_CHUNK_SIZE=-1
 YOUTUBE_UPLOAD_MAX_RETRIES=10

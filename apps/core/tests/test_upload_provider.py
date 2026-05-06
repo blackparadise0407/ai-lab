@@ -149,7 +149,6 @@ class YouTubeUploadAdapterTests(unittest.TestCase):
                     "YOUTUBE_CLIENT_ID": "client-id",
                     "YOUTUBE_CLIENT_SECRET": "client-secret",
                     "YOUTUBE_REFRESH_TOKEN": "refresh-token",
-                    "YOUTUBE_CATEGORY_ID": "22",
                     "YOUTUBE_TAGS": "dubbed, ai lab",
                     "YOUTUBE_UPLOAD_CHUNK_SIZE": "1048576",
                 },
@@ -172,7 +171,6 @@ class YouTubeUploadAdapterTests(unittest.TestCase):
         self.assertEqual(insert_kwargs["body"]["snippet"]["title"], "Dubbed video")
         self.assertEqual(insert_kwargs["body"]["snippet"]["description"], "Published by AI Lab")
         self.assertEqual(insert_kwargs["body"]["snippet"]["tags"], ["dubbed", "ai lab"])
-        self.assertEqual(insert_kwargs["body"]["snippet"]["categoryId"], "22")
         self.assertEqual(insert_kwargs["body"]["status"]["privacyStatus"], "unlisted")
         self.assertEqual(fake_youtube.videos_resource.insert_request.calls, 1)
 

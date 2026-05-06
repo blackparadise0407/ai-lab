@@ -239,9 +239,8 @@ class YouTubeUploadAdapter(UploadProviderAdapter):
                 "title": request.title,
                 "description": request.description,
                 "tags": self._get_tags(),
-                "categoryId": os.getenv("YOUTUBE_CATEGORY_ID", "22"),
             },
-            "status": {"privacyStatus": privacy_status},
+            "status": {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False},
         }
         insert_request = youtube.videos().insert(
             part=",".join(body.keys()),

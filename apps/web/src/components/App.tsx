@@ -166,7 +166,7 @@ function App() {
     useState<UploadPlatform>("youtube");
   const [publishTitle, setPublishTitle] = useState("");
   const [publishDescription, setPublishDescription] = useState("");
-  const [publishPrivacy, setPublishPrivacy] = useState("private");
+  const [publishPrivacy, setPublishPrivacy] = useState("public");
   const [selectedConnectedAccountId, setSelectedConnectedAccountId] = useState<
     number | null
   >(null);
@@ -249,7 +249,7 @@ function App() {
   useEffect(() => {
     setPublishTitle("");
     setPublishDescription("");
-    setPublishPrivacy("private");
+    setPublishPrivacy("public");
     setPublishResult(null);
     setPublishError(null);
   }, [selectedJobId]);
@@ -295,7 +295,7 @@ function App() {
           publishPlatform === "youtube" ? selectedConnectedAccountId : null,
         title: publishTitle.trim(),
         description: publishDescription.trim(),
-        privacy: publishPrivacy.trim() || "private",
+        privacy: publishPrivacy.trim() || "public",
       });
     },
     onSuccess: async (result) => {
@@ -347,11 +347,6 @@ function App() {
       artifacts.find((artifact) => artifact.artifact_type === "dubbed_video"),
     [artifacts],
   );
-
-  useEffect(() => {
-    if (!job || publishTitle.trim()) return;
-    setPublishTitle(`${job.external_job_id} dubbed video`);
-  }, [job, publishTitle]);
 
   useEffect(() => {
     if (selectedConnectedAccountId !== null) {
@@ -819,7 +814,7 @@ function App() {
                 <Label htmlFor="publish-privacy">Privacy</Label>
                 <Input
                   id="publish-privacy"
-                  placeholder="private"
+                  placeholder="public"
                   value={publishPrivacy}
                   onChange={(event) => setPublishPrivacy(event.target.value)}
                 />
