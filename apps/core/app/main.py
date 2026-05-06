@@ -5,7 +5,13 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from app.api.origins import ALLOWED_BROWSER_ORIGINS
-from app.api.routes import artifacts_router, job_events_router, jobs_router, provider_requests_router
+from app.api.routes import (
+    artifacts_router,
+    job_events_router,
+    jobs_router,
+    provider_requests_router,
+    uploads_router,
+)
 from app.db.database import init_db
 from app.workers.video_processor import video_processing_worker
 
@@ -55,3 +61,4 @@ app.include_router(jobs_router)
 app.include_router(job_events_router)
 app.include_router(artifacts_router)
 app.include_router(provider_requests_router)
+app.include_router(uploads_router)
