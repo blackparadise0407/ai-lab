@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+a {
   font: inherit;
 }
 
@@ -50,6 +51,16 @@ button:disabled {
 button.secondary {
   background: #e9eef8;
   color: #1d3557;
+}
+
+.action-link {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-radius: 999px;
+  color: #fff;
+  flex: 0 0 auto;
+  font-weight: 900;
+  padding: 0.65rem 0.9rem;
+  text-decoration: none;
 }
 
 .shell {
@@ -197,8 +208,19 @@ input:focus {
   padding: 1rem 1.2rem;
 }
 
-.dashboard-panel {
+.dashboard-panel,
+.preview-panel {
   margin-bottom: 1.5rem;
+}
+
+.video-preview {
+  aspect-ratio: 16 / 9;
+  background: #020617;
+  border-radius: 22px;
+  display: block;
+  max-height: 68vh;
+  object-fit: contain;
+  width: 100%;
 }
 
 .status-pill {
@@ -301,12 +323,17 @@ input:focus {
 }
 
 .list-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 520px;
   min-height: 260px;
 }
 
 .data-list {
   display: grid;
   gap: 0.85rem;
+  overflow-y: auto;
+  padding-right: 0.35rem;
 }
 
 .data-row {
@@ -336,6 +363,14 @@ input:focus {
   text-decoration: none;
 }
 
+.row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .data-row code {
   background: #e2e8f0;
   border-radius: 999px;
@@ -363,6 +398,10 @@ input:focus {
   .data-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .row-actions {
+    justify-content: flex-start;
   }
 
   .data-row code {
