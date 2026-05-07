@@ -4,6 +4,7 @@ from app.api.routes.job_events import router as job_events_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.provider_requests import router as provider_requests_router
 from app.api.routes.uploads import router as uploads_router
+from app.api.routes.video_collections import router as video_collections_router
 
 __all__ = [
     "connectors_router",
@@ -12,4 +13,5 @@ __all__ = [
     "provider_requests_router",
     "job_events_router",
     "uploads_router",
+    "video_collections_router",
 ]
