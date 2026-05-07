@@ -174,11 +174,10 @@ class DubProviderClient:
         headers = {"Accept": "application/json"}
         if provider_token:
             headers["Authorization"] = f"Bearer {provider_token}"
+        if provider_app_id:
+            headers["app-id"] = provider_app_id
 
-        url = voices_url
-        if provider_app_id and os.getenv("DUB_PROVIDER_VOICES_INCLUDE_APP_ID", "0") == "1":
-            separator = "&" if "?" in url else "?"
-            url = f"{url}{separator}{urlencode({'app_id': provider_app_id})}"
+        url = f"{voices_url}?voiceOwnership=VBEE&limit=100&language_code=vi-VN"
 
         request = urllib.request.Request(url, headers=headers, method="GET")
         try:
