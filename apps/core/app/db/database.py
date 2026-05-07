@@ -1,3 +1,4 @@
+from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 # Ensure SQLModel metadata is populated before create_all.
@@ -17,6 +18,27 @@ engine = create_engine(SQLITE_URL, connect_args={"check_same_thread": False})
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    _ensure_sqlite_columns()
+
+
+def _ensure_sqlite_columns() -> None:
+    inspector = inspect(engine)
+    table_columns = {
+        table_name: {column["name"] for column in inspector.get_columns(table_name)}
+        for table_name in inspector.get_table_names()
+    }
+    alter_statements = []
+    if "job" in table_columns and "voice_id" not in table_columns["job"]:
+        alter_statements.append("ALTER TABLE job ADD COLUMN voice_id VARCHAR(128)")
+    if "videocollection" in table_columns and "voice_id" not in table_columns["videocollection"]:
+        alter_statements.append("ALTER TABLE videocollection ADD COLUMN voice_id VARCHAR(128)")
+
+    if not alter_statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
 
 
 def get_session():

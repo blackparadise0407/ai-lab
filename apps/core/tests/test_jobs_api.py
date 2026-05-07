@@ -56,3 +56,33 @@ def test_list_jobs_supports_status_filter_and_pagination() -> None:
         "completed_2",
         "completed_1",
     ]
+
+
+def test_create_job_accepts_voice_id() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/v1/jobs",
+            json={
+                "source_language": "zh",
+                "target_language": "vi",
+                "voice_id": "voice-one",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["voice_id"] == "voice-one"

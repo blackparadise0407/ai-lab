@@ -29,6 +29,7 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
         external_job_id=f"job_{uuid4().hex[:12]}",
         source_language=payload.source_language,
         target_language=payload.target_language,
+        voice_id=payload.voice_id,
     )
     session.add(job)
     session.commit()

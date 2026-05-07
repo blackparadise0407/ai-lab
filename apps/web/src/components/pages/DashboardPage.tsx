@@ -25,6 +25,7 @@ import {
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
+  getDubProviderVoices,
   getJob,
   getProviderRequests,
   uploadVideoCollectionSource,
@@ -93,6 +94,7 @@ function setJobIdInUrl(jobId: number | null) {
 export default function DashboardPage() {
   const [sourceLanguage, setSourceLanguage] = useState("zh");
   const [targetLanguage, setTargetLanguage] = useState("vi");
+  const [voiceId, setVoiceId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(() =>
     getJobIdFromUrl(),
@@ -123,6 +125,12 @@ export default function DashboardPage() {
     queryKey: ["provider-requests", selectedJobId],
     queryFn: () => getProviderRequests(selectedJobId!),
     enabled: selectedJobId !== null,
+  });
+
+  const voicesQuery = useQuery({
+    queryKey: ["dub-provider-voices"],
+    queryFn: () => getDubProviderVoices(),
+    staleTime: 24 * 60 * 60 * 1000,
   });
 
   useEffect(() => {
@@ -170,6 +178,13 @@ export default function DashboardPage() {
     });
   }, [queryClient, selectedJobId]);
 
+  const refreshVoicesMutation = useMutation({
+    mutationFn: () => getDubProviderVoices(true),
+    onSuccess: (voiceList) => {
+      queryClient.setQueryData(["dub-provider-voices"], voiceList);
+    },
+  });
+
   const createAndUploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) {
@@ -180,6 +195,7 @@ export default function DashboardPage() {
         source_language: sourceLanguage,
         target_language: targetLanguage,
         title: file.name,
+        voice_id: voiceId || null,
         split_threshold_seconds: 60,
       });
       return uploadVideoCollectionSource(collection.id, file);
@@ -212,6 +228,7 @@ export default function DashboardPage() {
   const job = jobQuery.data ?? null;
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
+  const voices = voicesQuery.data?.items ?? [];
   const isRefreshing =
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
@@ -333,6 +350,47 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="grid gap-2">
+                <Label htmlFor="voice-id">Voice</Label>
+                <select
+                  id="voice-id"
+                  className="border-input focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  value={voiceId}
+                  disabled={voicesQuery.isLoading}
+                  onChange={(event) => setVoiceId(event.target.value)}
+                >
+                  <option value="">Default provider voice</option>
+                  {voices.map((voice) => (
+                    <option key={voice.voice_id} value={voice.voice_id}>
+                      {voice.name} ({voice.voice_id})
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {voicesQuery.isLoading
+                      ? "Loading provider voices…"
+                      : voicesQuery.isError
+                        ? "Unable to load provider voices; default voice will be used."
+                        : `${voices.length} provider voices available${
+                            voicesQuery.data?.cached ? " from cache" : ""
+                          }.`}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={voicesQuery.isFetching || refreshVoicesMutation.isPending}
+                    onClick={() => refreshVoicesMutation.mutate()}
+                  >
+                    {(voicesQuery.isFetching || refreshVoicesMutation.isPending) && (
+                      <Loader2 className="animate-spin" />
+                    )}
+                    Refresh voices
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="source-video">Source video</Label>
                 <Input
                   id="source-video"
@@ -446,6 +504,9 @@ export default function DashboardPage() {
                 <Badge variant="secondary">
                   {job.source_language.toUpperCase()} →{" "}
                   {job.target_language.toUpperCase()}
+                </Badge>
+                <Badge variant="secondary">
+                  Voice {job.voice_id || "provider default"}
                 </Badge>
                 <Badge variant="secondary">
                   {job.progress_percent}% complete
