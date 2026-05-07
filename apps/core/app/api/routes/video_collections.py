@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -102,7 +103,8 @@ async def upload_collection_video(
 
     segment_output_dir = COLLECTION_SEGMENTS_DIR / f"collection_{collection_id}_{uuid4().hex[:8]}"
     try:
-        split_segments = split_video(
+        split_segments = await run_in_threadpool(
+            split_video,
             upload_path,
             segment_output_dir,
             max_segment_seconds=collection.split_threshold_seconds,
