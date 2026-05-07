@@ -429,7 +429,7 @@ export default function PublishPage() {
             ))}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_12rem]">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_12rem] items-start">
             <div className="grid gap-2">
               <Label htmlFor="title-template">Title template</Label>
               <Input
