@@ -21,3 +21,10 @@ class JobResponse(BaseModel):
     progress_percent: int
     created_at: datetime
     updated_at: datetime
+
+
+class JobListResponse(BaseModel):
+    items: list[JobResponse]
+    total: int
+    limit: int
+    offset: int

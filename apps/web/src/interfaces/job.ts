@@ -8,6 +8,13 @@ export type JobStatus =
   | 'failed'
   | 'canceled';
 
+export interface JobListResponse {
+  items: Job[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface Job {
   id: number;
   external_job_id: string;

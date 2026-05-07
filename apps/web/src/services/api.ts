@@ -1,4 +1,4 @@
-import type { Artifact, ConnectedAccount, Job, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
+import type { Artifact, ConnectedAccount, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -58,6 +58,25 @@ export async function uploadSourceVideo(jobId: number, file: File) {
 export async function getJob(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`);
   return parseJsonResponse<Job>(response);
+}
+
+export async function getJobs(
+  filters: { status?: Job['status']; limit?: number; offset?: number } = {},
+) {
+  const searchParams = new URLSearchParams();
+  if (filters.status) {
+    searchParams.set('status', filters.status);
+  }
+  if (filters.limit !== undefined) {
+    searchParams.set('limit', String(filters.limit));
+  }
+  if (filters.offset !== undefined) {
+    searchParams.set('offset', String(filters.offset));
+  }
+
+  const query = searchParams.toString();
+  const response = await fetch(`${apiBaseUrl}/v1/jobs${query ? `?${query}` : ''}`);
+  return parseJsonResponse<JobListResponse>(response);
 }
 
 export async function getArtifacts(jobId: number) {

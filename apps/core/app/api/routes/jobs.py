@@ -1,13 +1,14 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.job_updates import job_update_broker
 from app.db.database import get_session
 from app.models.entities import Artifact, Job, JobStatus
-from app.schemas.jobs import JobCreateRequest, JobResponse
+from app.schemas.jobs import JobCreateRequest, JobListResponse, JobResponse
 from app.workers.video_processor import video_processing_worker
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -94,6 +95,29 @@ async def upload_source_video(
     job_update_broker.notify(job.id, "source_video_uploaded")
     video_processing_worker.enqueue(job_id=job.id)
     return job
+
+
+@router.get(
+    "",
+    response_model=JobListResponse,
+    summary="List jobs",
+    description="Lists a paginated set of jobs, optionally filtered by status. Completed jobs power the videos dashboard draft.",
+)
+def list_jobs(
+    status: JobStatus | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+):
+    count_statement = select(func.count(Job.id))
+    statement = select(Job).order_by(Job.updated_at.desc()).offset(offset).limit(limit)
+    if status is not None:
+        count_statement = count_statement.where(Job.status == status)
+        statement = statement.where(Job.status == status)
+
+    total = session.exec(count_statement).one()
+    items = list(session.exec(statement).all())
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get(

@@ -3,6 +3,7 @@ import {
   QueryClient,
   QueryClientProvider,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -15,6 +16,10 @@ import {
   PlugZap,
   RefreshCw,
 } from "lucide-react";
+
+import { uploadPlatformOptions } from "../constants/uploadPlatforms";
+import type { AppPage } from "../interfaces/navigation";
+import { formatDate, getErrorMessage } from "../lib/format";
 
 import type {
   Artifact,
@@ -34,12 +39,17 @@ import {
   getArtifacts,
   getConnectedAccounts,
   getJob,
+  getJobs,
   getProviderRequests,
   getYouTubeAuthorizeUrl,
   publishJobUpload,
   uploadSourceVideo,
 } from "../services/api";
 import { subscribeToJobEvents } from "../services/jobEvents";
+import { EmptyState } from "./common/EmptyState";
+import { Sidebar } from "./layout/Sidebar";
+import { ConnectorDraft } from "./pages/ConnectorDraft";
+import { VideosDraft } from "./pages/VideosDraft";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button, buttonVariants } from "./ui/button";
@@ -76,27 +86,7 @@ const statusOrder: Job["status"][] = [
   "completed",
 ];
 
-const uploadPlatformOptions: {
-  value: UploadPlatform;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: "youtube",
-    label: "YouTube",
-    description: "Publish with the YouTube upload adapter.",
-  },
-  {
-    value: "facebook",
-    label: "Facebook",
-    description: "Publish with the Facebook video adapter.",
-  },
-  {
-    value: "tiktok",
-    label: "TikTok",
-    description: "Publish with the TikTok video adapter.",
-  },
-];
+const COMPLETED_JOBS_PAGE_SIZE = 10;
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -113,17 +103,6 @@ export function AppProvider() {
       <App />
     </QueryClientProvider>
   );
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }
 
 function getJobIdFromUrl() {
@@ -151,6 +130,8 @@ function setJobIdInUrl(jobId: number | null) {
 }
 
 function App() {
+  const [activePage, setActivePage] = useState<AppPage>("dashboard");
+  const [completedJobsPage, setCompletedJobsPage] = useState(0);
   const [sourceLanguage, setSourceLanguage] = useState("zh");
   const [targetLanguage, setTargetLanguage] = useState("vi");
   const [file, setFile] = useState<File | null>(null);
@@ -199,6 +180,21 @@ function App() {
   const connectedAccountsQuery = useQuery({
     queryKey: ["connected-accounts", publishPlatform],
     queryFn: () => getConnectedAccounts(publishPlatform),
+  });
+
+  const youtubeConnectedAccountsQuery = useQuery({
+    queryKey: ["connected-accounts", "youtube", "videos"],
+    queryFn: () => getConnectedAccounts("youtube"),
+  });
+
+  const completedJobsQuery = useQuery({
+    queryKey: ["jobs", "completed", completedJobsPage],
+    queryFn: () =>
+      getJobs({
+        status: "completed",
+        limit: COMPLETED_JOBS_PAGE_SIZE,
+        offset: completedJobsPage * COMPLETED_JOBS_PAGE_SIZE,
+      }),
   });
 
   useEffect(() => {
@@ -277,6 +273,32 @@ function App() {
     },
   });
 
+  const quickPublishMutation = useMutation({
+    mutationFn: async ({
+      jobId,
+      platform,
+    }: {
+      jobId: number;
+      platform: UploadPlatform;
+    }) => {
+      const accountId =
+        platform === "youtube" ? youtubeConnectedAccounts[0]?.id ?? null : null;
+
+      return publishJobUpload(jobId, {
+        platform,
+        connected_account_id: accountId,
+        title: `Dubbed video job #${jobId}`,
+        description: "Published from the AI Lab videos dashboard.",
+        privacy: "public",
+      });
+    },
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["provider-requests", result.job_id],
+      });
+    },
+  });
+
   const publishUploadMutation = useMutation({
     mutationFn: async () => {
       if (!job) {
@@ -317,11 +339,44 @@ function App() {
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
   const connectedAccounts = connectedAccountsQuery.data ?? [];
+  const youtubeConnectedAccounts = youtubeConnectedAccountsQuery.data ?? [];
+  const completedJobsResponse = completedJobsQuery.data ?? null;
+  const completedJobs = completedJobsResponse?.items ?? [];
+  const completedJobsTotal = completedJobsResponse?.total ?? 0;
+  const completedJobsTotalPages = Math.max(
+    1,
+    Math.ceil(completedJobsTotal / COMPLETED_JOBS_PAGE_SIZE),
+  );
+  const completedJobProviderRequests = useQueries({
+    queries: completedJobs.map((completedJob) => ({
+      queryKey: ["provider-requests", completedJob.id],
+      queryFn: () => getProviderRequests(completedJob.id),
+      staleTime: 2_500,
+    })),
+  });
+  const completedProviderRequestsByJobId = useMemo(() => {
+    const requestsByJobId = new Map<number, ProviderRequest[]>();
+    completedJobs.forEach((completedJob, index) => {
+      requestsByJobId.set(
+        completedJob.id,
+        completedJobProviderRequests[index]?.data ?? [],
+      );
+    });
+    return requestsByJobId;
+  }, [completedJobs, completedJobProviderRequests]);
+  const isVideosLoading =
+    completedJobsQuery.isLoading ||
+    completedJobProviderRequests.some((query) => query.isLoading);
+  const videosError =
+    completedJobsQuery.error ??
+    completedJobProviderRequests.find((query) => query.error)?.error ??
+    youtubeConnectedAccountsQuery.error;
   const isRefreshing =
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
     providerRequestsQuery.isFetching ||
-    connectedAccountsQuery.isFetching;
+    connectedAccountsQuery.isFetching ||
+    youtubeConnectedAccountsQuery.isFetching;
   const isLoadingJob =
     jobQuery.isLoading ||
     artifactsQuery.isLoading ||
@@ -389,6 +444,7 @@ function App() {
       queryClient.invalidateQueries({
         queryKey: ["connected-accounts", publishPlatform],
       }),
+      queryClient.invalidateQueries({ queryKey: ["jobs", "completed"] }),
     ]);
   }
 
@@ -429,7 +485,11 @@ function App() {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
+      <Sidebar activePage={activePage} onPageChange={setActivePage} />
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+        {activePage === "dashboard" && (
+          <>
       <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
         <div>
           <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
@@ -460,7 +520,7 @@ function App() {
         </Card>
       </section>
 
-      {error && (
+      {Boolean(error) && (
         <Alert variant="destructive" className="mb-6 bg-red-50">
           <AlertCircle />
           <AlertTitle>Dashboard error</AlertTitle>
@@ -896,7 +956,35 @@ function App() {
           ))}
         </DataPanel>
       </section>
-    </main>
+          </>
+        )}
+
+        {activePage === "connector" && <ConnectorDraft apiBaseUrl={apiBaseUrl} />}
+
+        {activePage === "videos" && (
+          <VideosDraft
+            completedJobs={completedJobs}
+            error={videosError}
+            isLoading={isVideosLoading}
+            onPageChange={setCompletedJobsPage}
+            onPublish={(jobId, platform) =>
+              quickPublishMutation.mutate({ jobId, platform })
+            }
+            page={completedJobsPage}
+            pageSize={COMPLETED_JOBS_PAGE_SIZE}
+            pendingPublish={
+              quickPublishMutation.isPending
+                ? quickPublishMutation.variables ?? null
+                : null
+            }
+            providerRequestsByJobId={completedProviderRequestsByJobId}
+            publishError={quickPublishMutation.error}
+            total={completedJobsTotal}
+            totalPages={completedJobsTotalPages}
+          />
+        )}
+      </main>
+    </div>
   );
 }
 
@@ -999,13 +1087,5 @@ function ProviderRequestRow({ request }: { request: ProviderRequest }) {
       </div>
       <Badge variant="secondary">{request.status}</Badge>
     </article>
-  );
-}
-
-function EmptyState({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-2xl border border-dashed bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-      {children}
-    </p>
   );
 }
