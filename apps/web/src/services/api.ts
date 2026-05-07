@@ -1,4 +1,4 @@
-import type { Artifact, ConnectedAccount, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse } from '../interfaces/job';
+import type { Artifact, ConnectedAccount, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse, VideoCollection, VideoCollectionCreateRequest, VideoCollectionDetail, VideoCollectionListResponse, VideoSegment } from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -77,6 +77,57 @@ export async function getJobs(
   const query = searchParams.toString();
   const response = await fetch(`${apiBaseUrl}/v1/jobs${query ? `?${query}` : ''}`);
   return parseJsonResponse<JobListResponse>(response);
+}
+
+export async function getVideoCollections(
+  filters: { status?: VideoCollection['status']; limit?: number; offset?: number } = {},
+) {
+  const searchParams = new URLSearchParams();
+  if (filters.status) {
+    searchParams.set('status', filters.status);
+  }
+  if (filters.limit !== undefined) {
+    searchParams.set('limit', String(filters.limit));
+  }
+  if (filters.offset !== undefined) {
+    searchParams.set('offset', String(filters.offset));
+  }
+
+  const query = searchParams.toString();
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections${query ? `?${query}` : ''}`);
+  return parseJsonResponse<VideoCollectionListResponse>(response);
+}
+
+export async function getVideoCollection(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}`);
+  return parseJsonResponse<VideoCollectionDetail>(response);
+}
+
+export async function getVideoCollectionSegments(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/segments`);
+  return parseJsonResponse<VideoSegment[]>(response);
+}
+
+export async function createVideoCollection(payload: VideoCollectionCreateRequest) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  return parseJsonResponse<VideoCollection>(response);
+}
+
+export async function uploadVideoCollectionSource(collectionId: number, file: File) {
+  const body = new FormData();
+  body.append('file', file);
+
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/video`, {
+    method: 'POST',
+    body,
+  });
+
+  return parseJsonResponse<VideoCollectionDetail>(response);
 }
 
 export async function getArtifacts(jobId: number) {

@@ -85,3 +85,65 @@ export interface JobEventPayload {
   provider_requests?: ProviderRequest[];
   job_id?: number;
 }
+
+export interface VideoSegmentArtifact {
+  id: number;
+  job_id: number;
+  artifact_type: string;
+  storage_url: string;
+  content_type?: string | null;
+  created_at: string;
+}
+
+export interface VideoSegment {
+  id: number;
+  collection_id: number;
+  job_id: number;
+  sequence_index: number;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: number;
+  source_artifact_id?: number | null;
+  processed_artifact_id?: number | null;
+  created_at: string;
+  updated_at: string;
+  job?: Job | null;
+  source_artifact?: VideoSegmentArtifact | null;
+  processed_artifact?: VideoSegmentArtifact | null;
+}
+
+export interface VideoCollection {
+  id: number;
+  external_collection_id: string;
+  title?: string | null;
+  original_filename?: string | null;
+  source_language: string;
+  target_language: string;
+  source_artifact_id?: number | null;
+  total_duration_seconds?: number | null;
+  split_threshold_seconds: number;
+  status: JobStatus;
+  segment_count: number;
+  completed_segment_count: number;
+  progress_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoCollectionDetail extends VideoCollection {
+  segments: VideoSegment[];
+}
+
+export interface VideoCollectionListResponse {
+  items: VideoCollection[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface VideoCollectionCreateRequest {
+  title?: string | null;
+  source_language: string;
+  target_language: string;
+  split_threshold_seconds?: number;
+}

@@ -1,7 +1,15 @@
 from sqlmodel import Session, SQLModel, create_engine
 
 # Ensure SQLModel metadata is populated before create_all.
-from app.models.entities import Artifact, ConnectedAccount, ConnectorState, Job, ProviderRequest  # noqa: F401
+from app.models.entities import (  # noqa: F401
+    Artifact,
+    ConnectedAccount,
+    ConnectorState,
+    Job,
+    ProviderRequest,
+    VideoCollection,
+    VideoSegment,
+)
 
 SQLITE_URL = "sqlite:///./core.db"
 engine = create_engine(SQLITE_URL, connect_args={"check_same_thread": False})

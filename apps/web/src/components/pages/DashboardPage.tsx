@@ -23,14 +23,14 @@ import type {
 } from "../../interfaces/job";
 import {
   apiBaseUrl,
-  createJob,
+  createVideoCollection,
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
   getJob,
   getProviderRequests,
   publishJobUpload,
-  uploadSourceVideo,
+  uploadVideoCollectionSource,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
 import { EmptyState } from "../common/EmptyState";
@@ -192,22 +192,33 @@ export default function DashboardPage() {
   const createAndUploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) {
-        throw new Error("Choose a source video before creating a job.");
+        throw new Error("Choose a source video before creating a collection.");
       }
 
-      const created = await createJob(sourceLanguage, targetLanguage);
-      return uploadSourceVideo(created.id, file);
+      const collection = await createVideoCollection({
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        title: file.name,
+        split_threshold_seconds: 60,
+      });
+      return uploadVideoCollectionSource(collection.id, file);
     },
-    onSuccess: async (uploaded) => {
+    onSuccess: async (uploadedCollection) => {
+      const firstSegment = uploadedCollection.segments[0];
+      const uploaded = firstSegment?.job ?? null;
+      if (!uploaded) {
+        throw new Error("Collection upload did not create a trackable segment job.");
+      }
       setFormError(null);
       setSelectedJobId(uploaded.id);
       setJobIdInput(String(uploaded.id));
       queryClient.setQueryData(["job", uploaded.id], uploaded);
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
       await refreshDashboard(uploaded.id);
     },
     onError: (error) => {
       setFormError(
-        getErrorMessage(error, "Unable to create and upload the job."),
+        getErrorMessage(error, "Unable to create the collection and upload the video."),
       );
     },
   });
@@ -321,7 +332,7 @@ export default function DashboardPage() {
             AI Lab
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-            Create a pipeline job, upload source video, watch websocket status
+            Create a video collection, upload source video, watch websocket status
             updates, and inspect the generated artifacts and provider requests
             from one Tailwind + shadcn/ui client-side app.
           </p>
@@ -357,7 +368,7 @@ export default function DashboardPage() {
               1
             </span>
             <div>
-              <CardTitle>Create pipeline job</CardTitle>
+              <CardTitle>Create video collection</CardTitle>
               <CardDescription>
                 Defaults match the current ZH → VI dubbing workflow.
               </CardDescription>
@@ -400,7 +411,7 @@ export default function DashboardPage() {
                 )}
                 {createAndUploadMutation.isPending
                   ? "Creating and uploading…"
-                  : "Create job and upload video"}
+                  : "Create collection and upload video"}
               </Button>
             </form>
           </CardContent>

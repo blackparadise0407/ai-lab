@@ -6,20 +6,21 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import type { ProviderRequest, UploadPlatform } from "../../interfaces/job";
+import type { ProviderRequest, UploadPlatform, VideoSegment } from "../../interfaces/job";
 import {
   getConnectedAccounts,
-  getJobs,
   getProviderRequests,
+  getVideoCollectionSegments,
+  getVideoCollections,
   publishJobUpload,
 } from "../../services/api";
 
 import { VideosDraft } from "./VideosDraft";
 
-const COMPLETED_JOBS_PAGE_SIZE = 10;
+const VIDEO_COLLECTIONS_PAGE_SIZE = 10;
 
 export default function VideosPage() {
-  const [completedJobsPage, setCompletedJobsPage] = useState(0);
+  const [collectionsPage, setCollectionsPage] = useState(0);
   const queryClient = useQueryClient();
 
   const youtubeConnectedAccountsQuery = useQuery({
@@ -27,50 +28,67 @@ export default function VideosPage() {
     queryFn: () => getConnectedAccounts("youtube"),
   });
 
-  const completedJobsQuery = useQuery({
-    queryKey: ["jobs", "completed", completedJobsPage],
+  const collectionsQuery = useQuery({
+    queryKey: ["video-collections", collectionsPage],
     queryFn: () =>
-      getJobs({
-        status: "completed",
-        limit: COMPLETED_JOBS_PAGE_SIZE,
-        offset: completedJobsPage * COMPLETED_JOBS_PAGE_SIZE,
+      getVideoCollections({
+        limit: VIDEO_COLLECTIONS_PAGE_SIZE,
+        offset: collectionsPage * VIDEO_COLLECTIONS_PAGE_SIZE,
       }),
   });
 
   const youtubeConnectedAccounts = youtubeConnectedAccountsQuery.data ?? [];
-  const completedJobsResponse = completedJobsQuery.data ?? null;
-  const completedJobs = completedJobsResponse?.items ?? [];
-  const completedJobsTotal = completedJobsResponse?.total ?? 0;
-  const completedJobsTotalPages = Math.max(
+  const collectionsResponse = collectionsQuery.data ?? null;
+  const collections = collectionsResponse?.items ?? [];
+  const collectionsTotal = collectionsResponse?.total ?? 0;
+  const collectionsTotalPages = Math.max(
     1,
-    Math.ceil(completedJobsTotal / COMPLETED_JOBS_PAGE_SIZE),
+    Math.ceil(collectionsTotal / VIDEO_COLLECTIONS_PAGE_SIZE),
   );
 
-  const completedJobProviderRequests = useQueries({
-    queries: completedJobs.map((completedJob) => ({
-      queryKey: ["provider-requests", completedJob.id],
-      queryFn: () => getProviderRequests(completedJob.id),
+  const segmentQueries = useQueries({
+    queries: collections.map((collection) => ({
+      queryKey: ["video-collection-segments", collection.id],
+      queryFn: () => getVideoCollectionSegments(collection.id),
       staleTime: 2_500,
     })),
   });
 
-  const completedProviderRequestsByJobId = useMemo(() => {
+  const segmentsByCollectionId = useMemo(() => {
+    const segments = new Map<number, VideoSegment[]>();
+    collections.forEach((collection, index) => {
+      segments.set(collection.id, segmentQueries[index]?.data ?? []);
+    });
+    return segments;
+  }, [collections, segmentQueries]);
+
+  const allSegments = useMemo(
+    () => Array.from(segmentsByCollectionId.values()).flat(),
+    [segmentsByCollectionId],
+  );
+
+  const providerRequestQueries = useQueries({
+    queries: allSegments.map((segment) => ({
+      queryKey: ["provider-requests", segment.job_id],
+      queryFn: () => getProviderRequests(segment.job_id),
+      staleTime: 2_500,
+    })),
+  });
+
+  const providerRequestsByJobId = useMemo(() => {
     const requestsByJobId = new Map<number, ProviderRequest[]>();
-    completedJobs.forEach((completedJob, index) => {
-      requestsByJobId.set(
-        completedJob.id,
-        completedJobProviderRequests[index]?.data ?? [],
-      );
+    allSegments.forEach((segment, index) => {
+      requestsByJobId.set(segment.job_id, providerRequestQueries[index]?.data ?? []);
     });
     return requestsByJobId;
-  }, [completedJobs, completedJobProviderRequests]);
+  }, [allSegments, providerRequestQueries]);
 
-  const quickPublishMutation = useMutation({
+  const publishMutation = useMutation({
     mutationFn: async ({
-      jobId,
+      jobIds,
       platform,
     }: {
-      jobId: number;
+      jobIds: number[];
       platform: UploadPlatform;
     }) => {
       const accountId =
@@ -78,49 +96,63 @@ export default function VideosPage() {
           ? (youtubeConnectedAccounts[0]?.id ?? null)
           : null;
 
-      return publishJobUpload(jobId, {
-        platform,
-        connected_account_id: accountId,
-        title: `Dubbed video job #${jobId}`,
-        description: "Published from the AI Lab videos dashboard.",
-        privacy: "public",
-      });
+      return Promise.all(
+        jobIds.map((jobId) =>
+          publishJobUpload(jobId, {
+            platform,
+            connected_account_id: accountId,
+            title: `Dubbed video job #${jobId}`,
+            description: "Published from the AI Lab videos dashboard.",
+            privacy: "public",
+          }),
+        ),
+      );
     },
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({
-        queryKey: ["provider-requests", result.job_id],
-      });
+    onSuccess: async (results) => {
+      await Promise.all(
+        results.map((result) =>
+          queryClient.invalidateQueries({
+            queryKey: ["provider-requests", result.job_id],
+          }),
+        ),
+      );
     },
   });
 
   const isVideosLoading =
-    completedJobsQuery.isLoading ||
-    completedJobProviderRequests.some((query) => query.isLoading);
+    collectionsQuery.isLoading ||
+    segmentQueries.some((query) => query.isLoading) ||
+    providerRequestQueries.some((query) => query.isLoading);
   const videosError =
-    completedJobsQuery.error ??
-    completedJobProviderRequests.find((query) => query.error)?.error ??
+    collectionsQuery.error ??
+    segmentQueries.find((query) => query.error)?.error ??
+    providerRequestQueries.find((query) => query.error)?.error ??
     youtubeConnectedAccountsQuery.error;
 
   return (
     <VideosDraft
-      completedJobs={completedJobs}
+      collections={collections}
       error={videosError}
       isLoading={isVideosLoading}
-      onPageChange={setCompletedJobsPage}
+      onPageChange={setCollectionsPage}
       onPublish={(jobId, platform) =>
-        quickPublishMutation.mutate({ jobId, platform })
+        publishMutation.mutate({ jobIds: [jobId], platform })
       }
-      page={completedJobsPage}
-      pageSize={COMPLETED_JOBS_PAGE_SIZE}
+      onPublishAll={(jobIds, platform) =>
+        publishMutation.mutate({ jobIds, platform })
+      }
+      page={collectionsPage}
+      pageSize={VIDEO_COLLECTIONS_PAGE_SIZE}
       pendingPublish={
-        quickPublishMutation.isPending
-          ? (quickPublishMutation.variables ?? null)
+        publishMutation.isPending
+          ? (publishMutation.variables ?? null)
           : null
       }
-      providerRequestsByJobId={completedProviderRequestsByJobId}
-      publishError={quickPublishMutation.error}
-      total={completedJobsTotal}
-      totalPages={completedJobsTotalPages}
+      providerRequestsByJobId={providerRequestsByJobId}
+      publishError={publishMutation.error}
+      segmentsByCollectionId={segmentsByCollectionId}
+      total={collectionsTotal}
+      totalPages={collectionsTotalPages}
     />
   );
 }
