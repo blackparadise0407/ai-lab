@@ -78,6 +78,7 @@ class VideoProcessingWorker:
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
                 return
             target_language = job.target_language
+            voice_id = job.voice_id
 
             source_artifact = session.exec(
                 select(Artifact).where(
@@ -132,6 +133,7 @@ class VideoProcessingWorker:
             job_id,
             translated_srt_text,
             job_work_dir,
+            voice_id,
         )
 
         with Session(engine) as session:
@@ -420,7 +422,7 @@ class VideoProcessingWorker:
         return total_seconds
 
     def _synthesize_dubbed_audio_from_srt(
-        self, job_id: int, translated_srt: str, job_work_dir: Path
+        self, job_id: int, translated_srt: str, job_work_dir: Path, voice_id: str | None = None
     ) -> tuple[Path, list[str]]:
         blocks = self._parse_srt_blocks(translated_srt)
         if not blocks:
@@ -442,6 +444,7 @@ class VideoProcessingWorker:
                     text=text,
                     output_audio=chunk_audio_path,
                     duration_seconds=duration_seconds,
+                    voice_id=voice_id,
                 )
             )
             chunk_specs.append((start_time, end_time, chunk_audio_path))

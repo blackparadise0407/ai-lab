@@ -13,6 +13,7 @@ class VideoCollection(SQLModel, table=True):
     original_filename: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", max_length=8)
     target_language: str = Field(default="vi", max_length=8)
+    voice_id: Optional[str] = Field(default=None, max_length=128)
     source_artifact_id: Optional[int] = Field(default=None, foreign_key="artifact.id", index=True)
     total_duration_seconds: Optional[float] = Field(default=None, ge=0)
     split_threshold_seconds: int = Field(default=60, ge=1)

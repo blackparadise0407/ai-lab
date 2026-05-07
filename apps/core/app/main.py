@@ -8,6 +8,7 @@ from app.api.origins import ALLOWED_BROWSER_ORIGINS
 from app.api.routes import (
     artifacts_router,
     connectors_router,
+    dub_provider_router,
     job_events_router,
     jobs_router,
     provider_requests_router,
@@ -61,6 +62,7 @@ def healthcheck():
 
 app.include_router(jobs_router)
 app.include_router(connectors_router)
+app.include_router(dub_provider_router)
 app.include_router(job_events_router)
 app.include_router(artifacts_router)
 app.include_router(provider_requests_router)

@@ -1,4 +1,4 @@
-import type { Artifact, ConnectedAccount, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse, VideoCollection, VideoCollectionCreateRequest, VideoCollectionDetail, VideoCollectionListResponse, VideoSegment } from '../interfaces/job';
+import type { Artifact, ConnectedAccount, DubVoiceListResponse, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse, VideoCollection, VideoCollectionCreateRequest, VideoCollectionDetail, VideoCollectionListResponse, VideoSegment } from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -33,11 +33,11 @@ async function getResponseErrorMessage(response: Response) {
   return rawMessage;
 }
 
-export async function createJob(sourceLanguage: string, targetLanguage: string) {
+export async function createJob(sourceLanguage: string, targetLanguage: string, voiceId?: string | null) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source_language: sourceLanguage, target_language: targetLanguage }),
+    body: JSON.stringify({ source_language: sourceLanguage, target_language: targetLanguage, voice_id: voiceId || null }),
   });
 
   return parseJsonResponse<Job>(response);
@@ -77,6 +77,12 @@ export async function getJobs(
   const query = searchParams.toString();
   const response = await fetch(`${apiBaseUrl}/v1/jobs${query ? `?${query}` : ''}`);
   return parseJsonResponse<JobListResponse>(response);
+}
+
+export async function getDubProviderVoices(refresh = false) {
+  const searchParams = refresh ? '?refresh=true' : '';
+  const response = await fetch(`${apiBaseUrl}/v1/dub-provider/voices${searchParams}`);
+  return parseJsonResponse<DubVoiceListResponse>(response);
 }
 
 export async function getVideoCollections(

@@ -11,6 +11,7 @@ class VideoCollectionCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", min_length=2, max_length=8)
     target_language: str = Field(default="vi", min_length=2, max_length=8)
+    voice_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     split_threshold_seconds: int = Field(default=60, ge=1, le=600)
 
 
@@ -21,6 +22,7 @@ class VideoCollectionResponse(BaseModel):
     original_filename: Optional[str] = None
     source_language: str
     target_language: str
+    voice_id: Optional[str] = None
     source_artifact_id: Optional[int] = None
     total_duration_seconds: Optional[float] = None
     split_threshold_seconds: int

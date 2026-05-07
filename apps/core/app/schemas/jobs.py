@@ -9,6 +9,7 @@ from app.models.entities import JobStatus
 class JobCreateRequest(BaseModel):
     source_language: str = Field(default="zh", min_length=2, max_length=8)
     target_language: str = Field(default="vi", min_length=2, max_length=8)
+    voice_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class JobResponse(BaseModel):
@@ -16,6 +17,7 @@ class JobResponse(BaseModel):
     external_job_id: str
     source_language: str
     target_language: str
+    voice_id: Optional[str] = None
     status: JobStatus
     current_step: Optional[str] = None
     progress_percent: int

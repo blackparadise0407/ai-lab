@@ -26,6 +26,8 @@ DUB_TTS_CHUNK_MAX_ATTEMPTS=3
 DUB_TTS_CHUNK_RETRY_DELAY_SECONDS=2
 DUB_PROVIDER_VOICE_CODE=hn_female_ngochuyen_full_48k-fhg
 DUB_PROVIDER_URL=https://vbee.vn/api/v1/tts
+DUB_PROVIDER_VOICES_URL=https://vbee.vn/api/public/v1/voices
+DUB_PROVIDER_VOICES_CACHE_TTL_SECONDS=86400
 DUB_PROVIDER_APP_ID=
 DUB_PROVIDER_TOKEN=
 
@@ -55,7 +57,7 @@ If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough
 
 If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise SRT-timeline merging. `DUB_TTS_CHUNK_BATCH_SIZE` controls how many cues are synthesized in parallel per batch. Failed chunks are retried without resynthesizing successful chunks in the same batch; configure attempts with `DUB_TTS_CHUNK_MAX_ATTEMPTS` and the initial exponential-backoff delay with `DUB_TTS_CHUNK_RETRY_DELAY_SECONDS`.
 
-`target_language` is taken from the job record (`Job.target_language`) instead of environment configuration.
+`target_language` is taken from the job record (`Job.target_language`) instead of environment configuration. Selected TTS voices are stored per job as `voice_id`; when omitted, synthesis falls back to `DUB_PROVIDER_VOICE_CODE`. The backend exposes `GET /v1/dub-provider/voices` as a cached proxy for the provider voice list so the browser can populate a voice selector without calling Vbee directly.
 
 ## Provider integration
 

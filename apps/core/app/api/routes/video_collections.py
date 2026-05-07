@@ -41,6 +41,7 @@ def create_video_collection(
         title=payload.title,
         source_language=payload.source_language,
         target_language=payload.target_language,
+        voice_id=payload.voice_id,
         split_threshold_seconds=payload.split_threshold_seconds,
     )
     session.add(collection)
@@ -130,6 +131,7 @@ async def upload_collection_video(
             external_job_id=f"job_{uuid4().hex[:12]}",
             source_language=collection.source_language,
             target_language=collection.target_language,
+            voice_id=collection.voice_id,
             status=JobStatus.UPLOADED,
             current_step="source_video_uploaded",
             progress_percent=5,

@@ -20,6 +20,7 @@ export interface Job {
   external_job_id: string;
   source_language: string;
   target_language: string;
+  voice_id?: string | null;
   status: JobStatus;
   current_step?: string | null;
   progress_percent: number;
@@ -119,6 +120,7 @@ export interface VideoCollection {
   original_filename?: string | null;
   source_language: string;
   target_language: string;
+  voice_id?: string | null;
   source_artifact_id?: number | null;
   total_duration_seconds?: number | null;
   split_threshold_seconds: number;
@@ -145,5 +147,20 @@ export interface VideoCollectionCreateRequest {
   title?: string | null;
   source_language: string;
   target_language: string;
+  voice_id?: string | null;
   split_threshold_seconds?: number;
+}
+
+export interface DubVoice {
+  voice_id: string;
+  name: string;
+  gender?: string | null;
+  language?: string | null;
+  accent?: string | null;
+}
+
+export interface DubVoiceListResponse {
+  items: DubVoice[];
+  cached: boolean;
+  cache_ttl_seconds: number;
 }

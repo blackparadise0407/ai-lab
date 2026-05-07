@@ -11,6 +11,7 @@ class Job(SQLModel, table=True):
     external_job_id: str = Field(index=True, unique=True, max_length=64)
     source_language: str = Field(default="zh", max_length=8)
     target_language: str = Field(default="vi", max_length=8)
+    voice_id: Optional[str] = Field(default=None, max_length=128)
     status: JobStatus = Field(default=JobStatus.CREATED, index=True)
     current_step: Optional[str] = Field(default=None, max_length=64)
     progress_percent: int = Field(default=0, ge=0, le=100)
