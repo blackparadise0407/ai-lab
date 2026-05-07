@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   QueryClient,
   QueryClientProvider,
@@ -18,12 +19,10 @@ import {
 } from "lucide-react";
 
 import { uploadPlatformOptions } from "../constants/uploadPlatforms";
-import type { AppPage } from "../interfaces/navigation";
 import { formatDate, getErrorMessage } from "../lib/format";
 
 import type {
   Artifact,
-  ConnectedAccount,
   Job,
   JobEventPayload,
   ProviderRequest,
@@ -33,7 +32,6 @@ import type {
 import {
   apiBaseUrl,
   createJob,
-  deleteConnectedAccount,
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
@@ -41,7 +39,6 @@ import {
   getJob,
   getJobs,
   getProviderRequests,
-  getYouTubeAuthorizeUrl,
   publishJobUpload,
   uploadSourceVideo,
 } from "../services/api";
@@ -100,7 +97,9 @@ export const queryClient = new QueryClient({
 export function AppProvider() {
   return (
     <QueryClientProvider client={queryClient}>
-      <App />
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
@@ -130,7 +129,6 @@ function setJobIdInUrl(jobId: number | null) {
 }
 
 function App() {
-  const [activePage, setActivePage] = useState<AppPage>("dashboard");
   const [completedJobsPage, setCompletedJobsPage] = useState(0);
   const [sourceLanguage, setSourceLanguage] = useState("zh");
   const [targetLanguage, setTargetLanguage] = useState("vi");
@@ -148,9 +146,6 @@ function App() {
   const [publishTitle, setPublishTitle] = useState("");
   const [publishDescription, setPublishDescription] = useState("");
   const [publishPrivacy, setPublishPrivacy] = useState("public");
-  const [selectedConnectedAccountId, setSelectedConnectedAccountId] = useState<
-    number | null
-  >(null);
   const [publishResult, setPublishResult] =
     useState<PublishUploadResponse | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -175,11 +170,6 @@ function App() {
     queryKey: ["provider-requests", selectedJobId],
     queryFn: () => getProviderRequests(selectedJobId!),
     enabled: selectedJobId !== null,
-  });
-
-  const connectedAccountsQuery = useQuery({
-    queryKey: ["connected-accounts", publishPlatform],
-    queryFn: () => getConnectedAccounts(publishPlatform),
   });
 
   const youtubeConnectedAccountsQuery = useQuery({
@@ -282,7 +272,9 @@ function App() {
       platform: UploadPlatform;
     }) => {
       const accountId =
-        platform === "youtube" ? youtubeConnectedAccounts[0]?.id ?? null : null;
+        platform === "youtube"
+          ? (youtubeConnectedAccounts[0]?.id ?? null)
+          : null;
 
       return publishJobUpload(jobId, {
         platform,
@@ -313,8 +305,7 @@ function App() {
 
       return publishJobUpload(job.id, {
         platform: publishPlatform,
-        connected_account_id:
-          publishPlatform === "youtube" ? selectedConnectedAccountId : null,
+        connected_account_id: null,
         title: publishTitle.trim(),
         description: publishDescription.trim(),
         privacy: publishPrivacy.trim() || "public",
@@ -338,7 +329,6 @@ function App() {
   const job = jobQuery.data ?? null;
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
-  const connectedAccounts = connectedAccountsQuery.data ?? [];
   const youtubeConnectedAccounts = youtubeConnectedAccountsQuery.data ?? [];
   const completedJobsResponse = completedJobsQuery.data ?? null;
   const completedJobs = completedJobsResponse?.items ?? [];
@@ -375,17 +365,13 @@ function App() {
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
     providerRequestsQuery.isFetching ||
-    connectedAccountsQuery.isFetching ||
     youtubeConnectedAccountsQuery.isFetching;
   const isLoadingJob =
     jobQuery.isLoading ||
     artifactsQuery.isLoading ||
     providerRequestsQuery.isLoading;
   const dashboardError =
-    jobQuery.error ??
-    artifactsQuery.error ??
-    providerRequestsQuery.error ??
-    connectedAccountsQuery.error;
+    jobQuery.error ?? artifactsQuery.error ?? providerRequestsQuery.error;
   const error =
     formError ??
     (dashboardError
@@ -403,36 +389,6 @@ function App() {
     [artifacts],
   );
 
-  useEffect(() => {
-    if (selectedConnectedAccountId !== null) {
-      const stillExists = connectedAccounts.some(
-        (account) => account.id === selectedConnectedAccountId,
-      );
-      if (stillExists) return;
-    }
-    setSelectedConnectedAccountId(connectedAccounts[0]?.id ?? null);
-  }, [connectedAccounts, selectedConnectedAccountId]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const connectedAccountId = Number(params.get("youtube_connected"));
-    if (!Number.isInteger(connectedAccountId) || connectedAccountId <= 0)
-      return;
-
-    setPublishPlatform("youtube");
-    setSelectedConnectedAccountId(connectedAccountId);
-    params.delete("youtube_connected");
-    const nextSearch = params.toString();
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`,
-    );
-    void queryClient.invalidateQueries({
-      queryKey: ["connected-accounts", "youtube"],
-    });
-  }, [queryClient]);
-
   async function refreshDashboard(jobId = selectedJobId) {
     if (!jobId) return;
 
@@ -441,9 +397,6 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
       queryClient.invalidateQueries({ queryKey: ["artifacts", jobId] }),
       queryClient.invalidateQueries({ queryKey: ["provider-requests", jobId] }),
-      queryClient.invalidateQueries({
-        queryKey: ["connected-accounts", publishPlatform],
-      }),
       queryClient.invalidateQueries({ queryKey: ["jobs", "completed"] }),
     ]);
   }
@@ -465,20 +418,6 @@ function App() {
     setSelectedJobId(parsedId);
   }
 
-  function handleConnectYouTube() {
-    window.location.href = getYouTubeAuthorizeUrl();
-  }
-
-  async function handleDisconnectAccount(account: ConnectedAccount) {
-    await deleteConnectedAccount(account.id);
-    if (selectedConnectedAccountId === account.id) {
-      setSelectedConnectedAccountId(null);
-    }
-    await queryClient.invalidateQueries({
-      queryKey: ["connected-accounts", account.platform],
-    });
-  }
-
   function handlePublishUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     publishUploadMutation.mutate();
@@ -486,503 +425,476 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-      <Sidebar activePage={activePage} onPageChange={setActivePage} />
+      <Sidebar />
       <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
-        {activePage === "dashboard" && (
-          <>
-      <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
-        <div>
-          <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
-            AI Lab Dubbing Pipeline
-          </p>
-          <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
-            AI Lab
-          </h1>
-          <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-            Create a pipeline job, upload source video, watch websocket status
-            updates, and inspect the generated artifacts and provider requests
-            from one Tailwind + shadcn/ui client-side app.
-          </p>
-        </div>
-        <Card className="border-primary/10 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur">
-          <CardHeader>
-            <CardDescription>Connected API</CardDescription>
-            <CardTitle className="break-all text-lg">{apiBaseUrl}</CardTitle>
-            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              {socketStatus === "connected" ? (
-                <PlugZap className="size-4 text-emerald-600" />
-              ) : (
-                <Plug className="size-4" />
-              )}
-              <span>Websocket {socketStatus}</span>
-            </div>
-          </CardHeader>
-        </Card>
-      </section>
-
-      {Boolean(error) && (
-        <Alert variant="destructive" className="mb-6 bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Dashboard error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      <section className="mb-6 grid gap-6 lg:grid-cols-2">
-        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
-          <CardHeader className="grid-cols-[auto_1fr] items-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
-              1
-            </span>
-            <div>
-              <CardTitle>Create pipeline job</CardTitle>
-              <CardDescription>
-                Defaults match the current ZH → VI dubbing workflow.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4" onSubmit={handleCreateAndUpload}>
-              <div className="grid gap-2">
-                <Label htmlFor="source-language">Source language</Label>
-                <Input
-                  id="source-language"
-                  value={sourceLanguage}
-                  onChange={(event) => setSourceLanguage(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="target-language">Target language</Label>
-                <Input
-                  id="target-language"
-                  value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="source-video">Source video</Label>
-                <Input
-                  id="source-video"
-                  type="file"
-                  accept="video/*"
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                />
-              </div>
-              <Button
-                type="submit"
-                size="lg"
-                disabled={createAndUploadMutation.isPending}
-              >
-                {createAndUploadMutation.isPending && (
-                  <Loader2 className="animate-spin" />
-                )}
-                {createAndUploadMutation.isPending
-                  ? "Creating and uploading…"
-                  : "Create job and upload video"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
-          <CardHeader className="grid-cols-[auto_1fr] items-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
-              2
-            </span>
-            <div>
-              <CardTitle>Open existing job</CardTitle>
-              <CardDescription>
-                Use a job ID from Swagger, logs, or a previous dashboard
-                session.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4" onSubmit={handleLoadExisting}>
-              <div className="grid gap-2">
-                <Label htmlFor="job-id">Job ID</Label>
-                <Input
-                  id="job-id"
-                  inputMode="numeric"
-                  placeholder="Example: 1"
-                  value={jobIdInput}
-                  onChange={(event) => setJobIdInput(event.target.value)}
-                />
-              </div>
-              <Button type="submit" size="lg" disabled={isLoadingJob}>
-                {isLoadingJob && <Loader2 className="animate-spin" />}
-                {isLoadingJob ? "Loading…" : "Load job"}
-              </Button>
-              {job && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => refreshDashboard(job.id)}
-                  disabled={isRefreshing}
-                >
-                  <RefreshCw className={cn(isRefreshing && "animate-spin")} />
-                  Refresh now
-                </Button>
-              )}
-            </form>
-          </CardContent>
-        </Card>
-      </section>
-
-      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
-        <CardHeader>
-          <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
-              Pipeline status
-            </CardDescription>
-            <CardTitle className="mt-2 text-2xl">
-              {job
-                ? `Job #${job.id} · ${job.external_job_id}`
-                : "No job loaded"}
-            </CardTitle>
-          </div>
-          <CardAction>
-            {job && (
-              <StatusBadge status={job.status}>
-                {statusLabels[job.status]}
-              </StatusBadge>
-            )}
-          </CardAction>
-        </CardHeader>
-
-        <CardContent>
-          {job ? (
-            <div className="grid gap-5">
-              <Progress
-                value={job.progress_percent}
-                aria-label={`Progress ${job.progress_percent}%`}
-                className="h-4"
-              />
-              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                <Badge variant="secondary">
-                  {job.source_language.toUpperCase()} →{" "}
-                  {job.target_language.toUpperCase()}
-                </Badge>
-                <Badge variant="secondary">
-                  {job.progress_percent}% complete
-                </Badge>
-                <Badge variant="secondary">
-                  Updated {formatDate(job.updated_at)}
-                </Badge>
-                <Badge variant="secondary">
-                  {job.current_step ?? "Waiting for next step"}
-                </Badge>
-              </div>
-              <ol className="grid gap-3 lg:grid-cols-6">
-                {statusOrder.map((status, index) => (
-                  <li
-                    key={status}
-                    className={cn(
-                      "flex items-center gap-3 rounded-xl border bg-slate-50 p-3 text-sm font-bold text-muted-foreground",
-                      index <= activeStepIndex &&
-                        "border-primary/20 bg-primary/10 text-primary",
-                    )}
-                  >
-                    <span className="flex size-7 items-center justify-center rounded-full bg-white text-xs shadow-sm">
-                      {index + 1}
-                    </span>
-                    {statusLabels[status]}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : (
-            <EmptyState>
-              Create a job or load an existing one to see pipeline telemetry.
-            </EmptyState>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
-        <CardHeader>
-          <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
-              Final preview
-            </CardDescription>
-            <CardTitle className="mt-2 text-2xl">Dubbed video</CardTitle>
-          </div>
-          <CardAction>
-            {finalDubbedVideo && (
-              <a
-                className={buttonVariants({ size: "sm" })}
-                href={getArtifactDownloadUrl(finalDubbedVideo)}
-                download
-              >
-                <Download />
-                Download video
-              </a>
-            )}
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          {finalDubbedVideo ? (
-            <video
-              className="block aspect-video max-h-[68vh] w-full rounded-2xl bg-slate-950 object-contain"
-              controls
-              preload="metadata"
-              src={getArtifactPreviewUrl(finalDubbedVideo)}
-            >
-              <track kind="captions" />
-              Your browser does not support video previews.
-            </video>
-          ) : (
-            <EmptyState>
-              The final dubbed video preview appears here after processing
-              completes.
-            </EmptyState>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
-        <CardHeader>
-          <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
-              Publish
-            </CardDescription>
-            <CardTitle className="mt-2 text-2xl">
-              Upload completed video
-            </CardTitle>
-            <CardDescription>
-              Send the completed dubbed artifact to YouTube, Facebook, or TikTok
-              through the Core API upload adapter.
-            </CardDescription>
-          </div>
-          <CardAction>
-            {job?.status === "completed" ? (
-              <Badge className="bg-emerald-100 text-emerald-700">Ready</Badge>
-            ) : (
-              <Badge variant="secondary">Waiting for completed job</Badge>
-            )}
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4" onSubmit={handlePublishUpload}>
-            <div className="grid gap-3 md:grid-cols-3">
-              {uploadPlatformOptions.map((platform) => (
-                <button
-                  key={platform.value}
-                  type="button"
-                  className={cn(
-                    "rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
-                    publishPlatform === platform.value &&
-                      "border-primary bg-primary/10 ring-2 ring-primary/20",
-                  )}
-                  onClick={() => setPublishPlatform(platform.value)}
-                >
-                  <span className="font-black">{platform.label}</span>
-                  <span className="mt-1 block text-sm text-muted-foreground">
-                    {platform.description}
-                  </span>
-                </button>
-              ))}
-            </div>
-            {publishPlatform === "youtube" && (
-              <div className="rounded-2xl border bg-slate-50 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <>
+                <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
                   <div>
-                    <Label>YouTube connector</Label>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Connect a Google account with the YouTube upload scope,
-                      then choose it for this publish.
+                    <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
+                      AI Lab Dubbing Pipeline
+                    </p>
+                    <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
+                      AI Lab
+                    </h1>
+                    <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
+                      Create a pipeline job, upload source video, watch
+                      websocket status updates, and inspect the generated
+                      artifacts and provider requests from one Tailwind +
+                      shadcn/ui client-side app.
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleConnectYouTube}
-                  >
-                    Connect YouTube
-                  </Button>
-                </div>
-                <div className="mt-4 grid gap-2">
-                  {connectedAccounts.length > 0 ? (
-                    connectedAccounts.map((account) => (
-                      <label
-                        key={account.id}
-                        className={cn(
-                          "flex cursor-pointer flex-col gap-3 rounded-xl border bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between",
-                          selectedConnectedAccountId === account.id &&
-                            "border-primary ring-2 ring-primary/20",
+                  <Card className="border-primary/10 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur">
+                    <CardHeader>
+                      <CardDescription>Connected API</CardDescription>
+                      <CardTitle className="break-all text-lg">
+                        {apiBaseUrl}
+                      </CardTitle>
+                      <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                        {socketStatus === "connected" ? (
+                          <PlugZap className="size-4 text-emerald-600" />
+                        ) : (
+                          <Plug className="size-4" />
                         )}
+                        <span>Websocket {socketStatus}</span>
+                      </div>
+                    </CardHeader>
+                  </Card>
+                </section>
+
+                {Boolean(error) && (
+                  <Alert variant="destructive" className="mb-6 bg-red-50">
+                    <AlertCircle />
+                    <AlertTitle>Dashboard error</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                <section className="mb-6 grid gap-6 lg:grid-cols-2">
+                  <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+                    <CardHeader className="grid-cols-[auto_1fr] items-center">
+                      <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
+                        1
+                      </span>
+                      <div>
+                        <CardTitle>Create pipeline job</CardTitle>
+                        <CardDescription>
+                          Defaults match the current ZH → VI dubbing workflow.
+                        </CardDescription>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <form
+                        className="grid gap-4"
+                        onSubmit={handleCreateAndUpload}
                       >
-                        <span className="flex items-start gap-3">
-                          <input
-                            className="mt-1"
-                            type="radio"
-                            name="connected-youtube-account"
-                            checked={selectedConnectedAccountId === account.id}
-                            onChange={() =>
-                              setSelectedConnectedAccountId(account.id)
+                        <div className="grid gap-2">
+                          <Label htmlFor="source-language">
+                            Source language
+                          </Label>
+                          <Input
+                            id="source-language"
+                            value={sourceLanguage}
+                            onChange={(event) =>
+                              setSourceLanguage(event.target.value)
                             }
                           />
-                          <span>
-                            <strong>{account.display_name}</strong>
-                            <span className="mt-1 block break-all text-muted-foreground">
-                              Account #{account.id} · scopes:{" "}
-                              {account.scopes || "unknown"}
-                            </span>
-                            {account.expires_at && (
-                              <span className="mt-1 block text-muted-foreground">
-                                Access token expires{" "}
-                                {formatDate(account.expires_at)}
-                              </span>
-                            )}
-                          </span>
-                        </span>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="target-language">
+                            Target language
+                          </Label>
+                          <Input
+                            id="target-language"
+                            value={targetLanguage}
+                            onChange={(event) =>
+                              setTargetLanguage(event.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="source-video">Source video</Label>
+                          <Input
+                            id="source-video"
+                            type="file"
+                            accept="video/*"
+                            onChange={(event) =>
+                              setFile(event.target.files?.[0] ?? null)
+                            }
+                          />
+                        </div>
                         <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            void handleDisconnectAccount(account);
-                          }}
+                          type="submit"
+                          size="lg"
+                          disabled={createAndUploadMutation.isPending}
                         >
-                          Disconnect
+                          {createAndUploadMutation.isPending && (
+                            <Loader2 className="animate-spin" />
+                          )}
+                          {createAndUploadMutation.isPending
+                            ? "Creating and uploading…"
+                            : "Create job and upload video"}
                         </Button>
-                      </label>
-                    ))
-                  ) : (
-                    <p className="rounded-xl border border-dashed bg-white p-3 text-sm text-muted-foreground">
-                      No YouTube account connected yet. Publishing can still use
-                      env credentials if configured.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
+                      </form>
+                    </CardContent>
+                  </Card>
 
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
-              <div className="grid gap-2">
-                <Label htmlFor="publish-title">Title</Label>
-                <Input
-                  id="publish-title"
-                  maxLength={150}
-                  placeholder="Dubbed video title"
-                  value={publishTitle}
-                  onChange={(event) => setPublishTitle(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="publish-privacy">Privacy</Label>
-                <Input
-                  id="publish-privacy"
-                  placeholder="public"
-                  value={publishPrivacy}
-                  onChange={(event) => setPublishPrivacy(event.target.value)}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="publish-description">Description</Label>
-              <textarea
-                id="publish-description"
-                className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                maxLength={5000}
-                placeholder="Optional platform description"
-                value={publishDescription}
-                onChange={(event) => setPublishDescription(event.target.value)}
-              />
-            </div>
-            {publishError && (
-              <p className="text-sm font-medium text-destructive">
-                {publishError}
-              </p>
-            )}
-            {publishResult && (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                <strong>Published to {publishResult.platform}.</strong>
-                <p className="mt-1 break-all">
-                  Provider request: {publishResult.provider_request_id}
-                </p>
-                {publishResult.remote_url && (
-                  <a
-                    className="mt-2 inline-flex items-center gap-2 font-bold text-emerald-800 underline"
-                    href={publishResult.remote_url}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+                    <CardHeader className="grid-cols-[auto_1fr] items-center">
+                      <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
+                        2
+                      </span>
+                      <div>
+                        <CardTitle>Open existing job</CardTitle>
+                        <CardDescription>
+                          Use a job ID from Swagger, logs, or a previous
+                          dashboard session.
+                        </CardDescription>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <form
+                        className="grid gap-4"
+                        onSubmit={handleLoadExisting}
+                      >
+                        <div className="grid gap-2">
+                          <Label htmlFor="job-id">Job ID</Label>
+                          <Input
+                            id="job-id"
+                            inputMode="numeric"
+                            placeholder="Example: 1"
+                            value={jobIdInput}
+                            onChange={(event) =>
+                              setJobIdInput(event.target.value)
+                            }
+                          />
+                        </div>
+                        <Button type="submit" size="lg" disabled={isLoadingJob}>
+                          {isLoadingJob && <Loader2 className="animate-spin" />}
+                          {isLoadingJob ? "Loading…" : "Load job"}
+                        </Button>
+                        {job && (
+                          <Button
+                            variant="secondary"
+                            type="button"
+                            onClick={() => refreshDashboard(job.id)}
+                            disabled={isRefreshing}
+                          >
+                            <RefreshCw
+                              className={cn(isRefreshing && "animate-spin")}
+                            />
+                            Refresh now
+                          </Button>
+                        )}
+                      </form>
+                    </CardContent>
+                  </Card>
+                </section>
+
+                <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+                  <CardHeader>
+                    <div>
+                      <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
+                        Pipeline status
+                      </CardDescription>
+                      <CardTitle className="mt-2 text-2xl">
+                        {job
+                          ? `Job #${job.id} · ${job.external_job_id}`
+                          : "No job loaded"}
+                      </CardTitle>
+                    </div>
+                    <CardAction>
+                      {job && (
+                        <StatusBadge status={job.status}>
+                          {statusLabels[job.status]}
+                        </StatusBadge>
+                      )}
+                    </CardAction>
+                  </CardHeader>
+
+                  <CardContent>
+                    {job ? (
+                      <div className="grid gap-5">
+                        <Progress
+                          value={job.progress_percent}
+                          aria-label={`Progress ${job.progress_percent}%`}
+                          className="h-4"
+                        />
+                        <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                          <Badge variant="secondary">
+                            {job.source_language.toUpperCase()} →{" "}
+                            {job.target_language.toUpperCase()}
+                          </Badge>
+                          <Badge variant="secondary">
+                            {job.progress_percent}% complete
+                          </Badge>
+                          <Badge variant="secondary">
+                            Updated {formatDate(job.updated_at)}
+                          </Badge>
+                          <Badge variant="secondary">
+                            {job.current_step ?? "Waiting for next step"}
+                          </Badge>
+                        </div>
+                        <ol className="grid gap-3 lg:grid-cols-6">
+                          {statusOrder.map((status, index) => (
+                            <li
+                              key={status}
+                              className={cn(
+                                "flex items-center gap-3 rounded-xl border bg-slate-50 p-3 text-sm font-bold text-muted-foreground",
+                                index <= activeStepIndex &&
+                                  "border-primary/20 bg-primary/10 text-primary",
+                              )}
+                            >
+                              <span className="flex size-7 items-center justify-center rounded-full bg-white text-xs shadow-sm">
+                                {index + 1}
+                              </span>
+                              {statusLabels[status]}
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : (
+                      <EmptyState>
+                        Create a job or load an existing one to see pipeline
+                        telemetry.
+                      </EmptyState>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+                  <CardHeader>
+                    <div>
+                      <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
+                        Final preview
+                      </CardDescription>
+                      <CardTitle className="mt-2 text-2xl">
+                        Dubbed video
+                      </CardTitle>
+                    </div>
+                    <CardAction>
+                      {finalDubbedVideo && (
+                        <a
+                          className={buttonVariants({ size: "sm" })}
+                          href={getArtifactDownloadUrl(finalDubbedVideo)}
+                          download
+                        >
+                          <Download />
+                          Download video
+                        </a>
+                      )}
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    {finalDubbedVideo ? (
+                      <video
+                        className="block aspect-video max-h-[68vh] w-full rounded-2xl bg-slate-950 object-contain"
+                        controls
+                        preload="metadata"
+                        src={getArtifactPreviewUrl(finalDubbedVideo)}
+                      >
+                        <track kind="captions" />
+                        Your browser does not support video previews.
+                      </video>
+                    ) : (
+                      <EmptyState>
+                        The final dubbed video preview appears here after
+                        processing completes.
+                      </EmptyState>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+                  <CardHeader>
+                    <div>
+                      <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
+                        Publish
+                      </CardDescription>
+                      <CardTitle className="mt-2 text-2xl">
+                        Upload completed video
+                      </CardTitle>
+                      <CardDescription>
+                        Send the completed dubbed artifact to YouTube, Facebook,
+                        or TikTok through the Core API upload adapter.
+                      </CardDescription>
+                    </div>
+                    <CardAction>
+                      {job?.status === "completed" ? (
+                        <Badge className="bg-emerald-100 text-emerald-700">
+                          Ready
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">
+                          Waiting for completed job
+                        </Badge>
+                      )}
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    <form className="grid gap-4" onSubmit={handlePublishUpload}>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {uploadPlatformOptions.map((platform) => (
+                          <button
+                            key={platform.value}
+                            type="button"
+                            className={cn(
+                              "rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                              publishPlatform === platform.value &&
+                                "border-primary bg-primary/10 ring-2 ring-primary/20",
+                            )}
+                            onClick={() => setPublishPlatform(platform.value)}
+                          >
+                            <span className="font-black">{platform.label}</span>
+                            <span className="mt-1 block text-sm text-muted-foreground">
+                              {platform.description}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+                        <div className="grid gap-2">
+                          <Label htmlFor="publish-title">Title</Label>
+                          <Input
+                            id="publish-title"
+                            maxLength={150}
+                            placeholder="Dubbed video title"
+                            value={publishTitle}
+                            onChange={(event) =>
+                              setPublishTitle(event.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="publish-privacy">Privacy</Label>
+                          <Input
+                            id="publish-privacy"
+                            placeholder="public"
+                            value={publishPrivacy}
+                            onChange={(event) =>
+                              setPublishPrivacy(event.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="publish-description">Description</Label>
+                        <textarea
+                          id="publish-description"
+                          className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          maxLength={5000}
+                          placeholder="Optional platform description"
+                          value={publishDescription}
+                          onChange={(event) =>
+                            setPublishDescription(event.target.value)
+                          }
+                        />
+                      </div>
+                      {publishError && (
+                        <p className="text-sm font-medium text-destructive">
+                          {publishError}
+                        </p>
+                      )}
+                      {publishResult && (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                          <strong>
+                            Published to {publishResult.platform}.
+                          </strong>
+                          <p className="mt-1 break-all">
+                            Provider request:{" "}
+                            {publishResult.provider_request_id}
+                          </p>
+                          {publishResult.remote_url && (
+                            <a
+                              className="mt-2 inline-flex items-center gap-2 font-bold text-emerald-800 underline"
+                              href={publishResult.remote_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open published video
+                              <ExternalLink className="size-4" />
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      <Button
+                        type="submit"
+                        size="lg"
+                        disabled={
+                          !finalDubbedVideo ||
+                          job?.status !== "completed" ||
+                          publishUploadMutation.isPending
+                        }
+                      >
+                        {publishUploadMutation.isPending && (
+                          <Loader2 className="animate-spin" />
+                        )}
+                        {publishUploadMutation.isPending
+                          ? "Publishing…"
+                          : `Publish to ${uploadPlatformOptions.find((platform) => platform.value === publishPlatform)?.label}`}
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+
+                <section className="grid gap-6 lg:grid-cols-2">
+                  <DataPanel
+                    title="Artifacts"
+                    count={artifacts.length}
+                    emptyLabel="No artifacts yet"
                   >
-                    Open published video
-                    <ExternalLink className="size-4" />
-                  </a>
-                )}
-              </div>
-            )}
-            <Button
-              type="submit"
-              size="lg"
-              disabled={
-                !finalDubbedVideo ||
-                job?.status !== "completed" ||
-                publishUploadMutation.isPending
-              }
-            >
-              {publishUploadMutation.isPending && (
-                <Loader2 className="animate-spin" />
-              )}
-              {publishUploadMutation.isPending
-                ? "Publishing…"
-                : `Publish to ${uploadPlatformOptions.find((platform) => platform.value === publishPlatform)?.label}`}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+                    {artifacts.map((artifact) => (
+                      <ArtifactRow artifact={artifact} key={artifact.id} />
+                    ))}
+                  </DataPanel>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <DataPanel
-          title="Artifacts"
-          count={artifacts.length}
-          emptyLabel="No artifacts yet"
-        >
-          {artifacts.map((artifact) => (
-            <ArtifactRow artifact={artifact} key={artifact.id} />
-          ))}
-        </DataPanel>
-
-        <DataPanel
-          title="Provider requests"
-          count={providerRequests.length}
-          emptyLabel="No provider requests yet"
-        >
-          {providerRequests.map((request) => (
-            <ProviderRequestRow request={request} key={request.id} />
-          ))}
-        </DataPanel>
-      </section>
-          </>
-        )}
-
-        {activePage === "connector" && <ConnectorDraft apiBaseUrl={apiBaseUrl} />}
-
-        {activePage === "videos" && (
-          <VideosDraft
-            completedJobs={completedJobs}
-            error={videosError}
-            isLoading={isVideosLoading}
-            onPageChange={setCompletedJobsPage}
-            onPublish={(jobId, platform) =>
-              quickPublishMutation.mutate({ jobId, platform })
+                  <DataPanel
+                    title="Provider requests"
+                    count={providerRequests.length}
+                    emptyLabel="No provider requests yet"
+                  >
+                    {providerRequests.map((request) => (
+                      <ProviderRequestRow request={request} key={request.id} />
+                    ))}
+                  </DataPanel>
+                </section>
+              </>
             }
-            page={completedJobsPage}
-            pageSize={COMPLETED_JOBS_PAGE_SIZE}
-            pendingPublish={
-              quickPublishMutation.isPending
-                ? quickPublishMutation.variables ?? null
-                : null
-            }
-            providerRequestsByJobId={completedProviderRequestsByJobId}
-            publishError={quickPublishMutation.error}
-            total={completedJobsTotal}
-            totalPages={completedJobsTotalPages}
           />
-        )}
+          <Route
+            path="/connector"
+            element={<ConnectorDraft apiBaseUrl={apiBaseUrl} />}
+          />
+          <Route
+            path="/videos"
+            element={
+              <VideosDraft
+                completedJobs={completedJobs}
+                error={videosError}
+                isLoading={isVideosLoading}
+                onPageChange={setCompletedJobsPage}
+                onPublish={(jobId, platform) =>
+                  quickPublishMutation.mutate({ jobId, platform })
+                }
+                page={completedJobsPage}
+                pageSize={COMPLETED_JOBS_PAGE_SIZE}
+                pendingPublish={
+                  quickPublishMutation.isPending
+                    ? (quickPublishMutation.variables ?? null)
+                    : null
+                }
+                providerRequestsByJobId={completedProviderRequestsByJobId}
+                publishError={quickPublishMutation.error}
+                total={completedJobsTotal}
+                totalPages={completedJobsTotalPages}
+              />
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
     </div>
   );
