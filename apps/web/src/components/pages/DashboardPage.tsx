@@ -521,46 +521,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
-        <CardHeader>
-          <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
-              Final preview
-            </CardDescription>
-            <CardTitle className="mt-2 text-2xl">Dubbed video</CardTitle>
-          </div>
-          <CardAction>
-            {finalDubbedVideo && (
-              <a
-                className={buttonVariants({ size: "sm" })}
-                href={getArtifactDownloadUrl(finalDubbedVideo)}
-                download
-              >
-                <Download />
-                Download video
-              </a>
-            )}
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          {finalDubbedVideo ? (
-            <video
-              className="block aspect-video max-h-[68vh] w-full rounded-2xl bg-slate-950 object-contain"
-              controls
-              preload="metadata"
-              src={getArtifactPreviewUrl(finalDubbedVideo)}
-            >
-              <track kind="captions" />
-              Your browser does not support video previews.
-            </video>
-          ) : (
-            <EmptyState>
-              The final dubbed video preview appears here after processing
-              completes.
-            </EmptyState>
-          )}
-        </CardContent>
-      </Card>
+      
 
       <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
