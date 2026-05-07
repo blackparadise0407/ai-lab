@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { LayoutDashboard, Plug, Video } from "lucide-react";
+import { LayoutDashboard, Plug, UploadCloud, Video } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { cn } from "../../lib/utils";
@@ -13,6 +13,7 @@ const navigationItems: {
 }[] = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { path: "/connector", label: "Connector", icon: Plug },
+  { path: "/publish", label: "Publish", icon: UploadCloud },
   { path: "/videos", label: "Videos", icon: Video },
 ];
 
