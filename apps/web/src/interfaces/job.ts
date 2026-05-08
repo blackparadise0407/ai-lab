@@ -157,6 +157,8 @@ export interface DubVoice {
   gender?: string | null;
   language?: string | null;
   accent?: string | null;
+  credit_factor?: number | null;
+  demo?: string | null;
 }
 
 export interface DubVoiceListResponse {
