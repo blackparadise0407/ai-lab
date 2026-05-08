@@ -11,6 +11,10 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import {
+  DEFAULT_TARGET_LANGUAGE_CODE,
+  targetLanguages,
+} from "../../constants/languages";
 import { formatDate, getErrorMessage } from "../../lib/format";
 import { cn } from "../../lib/utils";
 import type {
@@ -108,7 +112,9 @@ function setJobIdInUrl(jobId: number | null) {
 
 export default function DashboardPage() {
   const [sourceLanguage, setSourceLanguage] = useState("zh");
-  const [targetLanguage, setTargetLanguage] = useState("vi");
+  const [targetLanguage, setTargetLanguage] = useState(
+    DEFAULT_TARGET_LANGUAGE_CODE,
+  );
   const [voiceId, setVoiceId] = useState("");
   const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
   const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
@@ -145,8 +151,8 @@ export default function DashboardPage() {
   });
 
   const voicesQuery = useQuery({
-    queryKey: ["dub-provider-voices"],
-    queryFn: () => getDubProviderVoices(),
+    queryKey: ["dub-provider-voices", targetLanguage],
+    queryFn: () => getDubProviderVoices(false, targetLanguage),
     staleTime: 24 * 60 * 60 * 1000,
   });
 
@@ -196,9 +202,12 @@ export default function DashboardPage() {
   }, [queryClient, selectedJobId]);
 
   const refreshVoicesMutation = useMutation({
-    mutationFn: () => getDubProviderVoices(true),
+    mutationFn: () => getDubProviderVoices(true, targetLanguage),
     onSuccess: (voiceList) => {
-      queryClient.setQueryData(["dub-provider-voices"], voiceList);
+      queryClient.setQueryData(
+        ["dub-provider-voices", targetLanguage],
+        voiceList,
+      );
     },
   });
 
@@ -377,11 +386,24 @@ export default function DashboardPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="target-language">Target language</Label>
-                <Input
-                  id="target-language"
+                <Select
                   value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.target.value)}
-                />
+                  onValueChange={(value) => {
+                    setTargetLanguage(value);
+                    setVoiceId("");
+                  }}
+                >
+                  <SelectTrigger id="target-language">
+                    <SelectValue placeholder="Select target language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {targetLanguages.map((language) => (
+                      <SelectItem key={language.code} value={language.code}>
+                        {language.name} ({language.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="voice-id">Voice</Label>

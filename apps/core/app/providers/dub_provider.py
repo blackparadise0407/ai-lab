@@ -46,8 +46,8 @@ class DubVoiceList:
 
 
 class DubProviderClient:
-    _voices_cache: list[DubVoice] | None = None
-    _voices_cache_expires_at = 0.0
+    _voices_cache: dict[str, list[DubVoice]] = {}
+    _voices_cache_expires_at: dict[str, float] = {}
     _voices_cache_lock = threading.Lock()
 
     def synthesize_chunks(self, job_id: int, chunk_requests: list[TtsChunkRequest]) -> list[str]:
@@ -94,24 +94,26 @@ class DubProviderClient:
 
         return provider_request_ids
 
-    def list_voices(self, force_refresh: bool = False) -> DubVoiceList:
+    def list_voices(self, force_refresh: bool = False, language_code: str = "vi-VN") -> DubVoiceList:
+        language_code = language_code.strip() or "vi-VN"
         cache_ttl_seconds = self._get_voices_cache_ttl_seconds()
         now = time.time()
         with self._voices_cache_lock:
+            cached_voices = self._voices_cache.get(language_code)
             if (
                 not force_refresh
-                and self._voices_cache is not None
-                and now < self._voices_cache_expires_at
+                and cached_voices is not None
+                and now < self._voices_cache_expires_at.get(language_code, 0.0)
             ):
                 return DubVoiceList(
-                    voices=list(self._voices_cache),
+                    voices=list(cached_voices),
                     cached=True,
                     cache_ttl_seconds=cache_ttl_seconds,
                 )
 
-            voices = self._fetch_voices()
-            self._voices_cache = voices
-            self._voices_cache_expires_at = now + cache_ttl_seconds
+            voices = self._fetch_voices(language_code)
+            self._voices_cache[language_code] = voices
+            self._voices_cache_expires_at[language_code] = now + cache_ttl_seconds
             return DubVoiceList(
                 voices=list(voices),
                 cached=False,
@@ -121,8 +123,8 @@ class DubProviderClient:
     @classmethod
     def clear_voices_cache(cls) -> None:
         with cls._voices_cache_lock:
-            cls._voices_cache = None
-            cls._voices_cache_expires_at = 0.0
+            cls._voices_cache = {}
+            cls._voices_cache_expires_at = {}
 
     def _synthesize_chunk(self, job_id: int, chunk_request: TtsChunkRequest) -> str:
         provider_url = os.getenv("DUB_PROVIDER_URL")
@@ -169,7 +171,7 @@ class DubProviderClient:
         self._download_file(audio_url, chunk_request.output_audio)
         return provider_request_id
 
-    def _fetch_voices(self) -> list[DubVoice]:
+    def _fetch_voices(self, language_code: str) -> list[DubVoice]:
         voices_url = os.getenv("DUB_PROVIDER_VOICES_URL", "https://vbee.vn/api/public/v1/voices")
         provider_token = os.getenv("DUB_PROVIDER_TOKEN")
         provider_app_id = os.getenv("DUB_PROVIDER_APP_ID")
@@ -179,7 +181,8 @@ class DubProviderClient:
         if provider_app_id:
             headers["app-id"] = provider_app_id
 
-        url = f"{voices_url}?voiceOwnership=VBEE&limit=100&language_code=vi-VN"
+        query = urlencode({"voiceOwnership": "VBEE", "limit": 100, "language_code": language_code})
+        url = f"{voices_url}?{query}"
 
         request = urllib.request.Request(url, headers=headers, method="GET")
         try:

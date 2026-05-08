@@ -91,9 +91,13 @@ export async function getJobs(
   return parseJsonResponse<JobListResponse>(response);
 }
 
-export async function getDubProviderVoices(refresh = false) {
-  const searchParams = refresh ? '?refresh=true' : '';
-  const response = await fetch(`${apiBaseUrl}/v1/dub-provider/voices${searchParams}`);
+export async function getDubProviderVoices(refresh = false, languageCode = 'vi-VN') {
+  const searchParams = new URLSearchParams({ language_code: languageCode });
+  if (refresh) {
+    searchParams.set('refresh', 'true');
+  }
+
+  const response = await fetch(`${apiBaseUrl}/v1/dub-provider/voices?${searchParams}`);
   return parseJsonResponse<DubVoiceListResponse>(response);
 }
 
