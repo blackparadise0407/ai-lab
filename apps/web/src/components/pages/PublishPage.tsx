@@ -6,7 +6,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { uploadPlatformOptions } from "../../constants/uploadPlatforms";
 import type {
@@ -19,6 +20,7 @@ import type {
   VideoSegment,
 } from "../../interfaces/job";
 import { formatDate, getErrorMessage } from "../../lib/format";
+import { useErrorToast } from "../../hooks/useErrorToast";
 import { cn } from "../../lib/utils";
 import {
   getConnectedAccounts,
@@ -31,7 +33,6 @@ import {
 } from "../../services/api";
 import { EmptyState } from "../common/EmptyState";
 import { PageHeader } from "../common/PageHeader";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button, buttonVariants } from "../ui/button";
 import {
@@ -103,7 +104,6 @@ export default function PublishPage() {
     "Published from the AI Lab publish workspace.",
   );
   const [privacy, setPrivacy] = useState("public");
-  const [lastSummary, setLastSummary] = useState<PublishSummary | null>(null);
 
   const youtubeConnectedAccountsQuery = useQuery({
     queryKey: ["connected-accounts", "youtube", "publish"],
@@ -243,7 +243,7 @@ export default function PublishPage() {
       );
     },
     onSuccess: async (summary, variables) => {
-      setLastSummary(summary);
+      showPublishSummaryToast(summary, variables.platform);
       await Promise.all([
         ...summary.successes.map((result) =>
           queryClient.invalidateQueries({
@@ -259,7 +259,6 @@ export default function PublishPage() {
           : []),
       ]);
     },
-    onError: () => setLastSummary(null),
   });
 
   const isLoading =
@@ -280,6 +279,17 @@ export default function PublishPage() {
   const directJob = directJobQuery.data ?? null;
   const directJobAlreadyShown = allSegments.some(
     (segment) => segment.job_id === preselectedJobId,
+  );
+
+  useErrorToast(
+    pageError ? getErrorMessage(pageError, "Unable to load publish data.") : null,
+    "Publish page error",
+  );
+  useErrorToast(
+    publishMutation.error
+      ? getErrorMessage(publishMutation.error, "Unable to publish videos.")
+      : null,
+    "Publish error",
   );
 
   function createTargets(row: CollectionRow, segments: VideoSegment[]) {
@@ -349,33 +359,6 @@ export default function PublishPage() {
         title="Publish collection videos"
         description="Publish completed videos from source collections. Long uploads stay grouped as collections while each completed segment is uploaded as its own platform video."
       />
-
-      {Boolean(pageError) && (
-        <Alert variant="destructive" className="bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Publish page error</AlertTitle>
-          <AlertDescription>
-            {getErrorMessage(pageError, "Unable to load publish data.")}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {Boolean(publishMutation.error) && (
-        <Alert variant="destructive" className="bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Publish error</AlertTitle>
-          <AlertDescription>
-            {getErrorMessage(
-              publishMutation.error,
-              "Unable to publish videos.",
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {lastSummary && (
-        <PublishSummaryAlert summary={lastSummary} platform={platform} />
-      )}
 
       <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
@@ -848,7 +831,27 @@ function DirectJobCard({
   );
 }
 
-function PublishSummaryAlert({
+function showPublishSummaryToast(
+  summary: PublishSummary,
+  platform: UploadPlatform,
+) {
+  const hasFailures = summary.failures.length > 0;
+  const title = hasFailures
+    ? "Publish completed with errors"
+    : "Publish completed";
+  const description = (
+    <PublishSummaryToastDescription platform={platform} summary={summary} />
+  );
+
+  if (hasFailures) {
+    toast.error(title, { description });
+    return;
+  }
+
+  toast.success(title, { description });
+}
+
+function PublishSummaryToastDescription({
   platform,
   summary,
 }: {
@@ -858,40 +861,29 @@ function PublishSummaryAlert({
   const hasFailures = summary.failures.length > 0;
 
   return (
-    <Alert
-      variant={hasFailures ? "destructive" : "default"}
-      className={hasFailures ? "bg-red-50" : "border-emerald-200 bg-emerald-50"}
-    >
-      {hasFailures && <AlertCircle />}
-      <AlertTitle>
-        {hasFailures ? "Publish completed with errors" : "Publish completed"}
-      </AlertTitle>
-      <AlertDescription>
-        <div className="grid gap-2">
-          <p>
-            {summary.successes.length} video(s) published to{" "}
-            {platformLabel(platform)}.
-            {hasFailures && ` ${summary.failures.length} video(s) failed.`}
-          </p>
-          {summary.successes.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {summary.successes.map((result) => (
-                <PublishedResultLink result={result} key={result.job_id} />
-              ))}
-            </div>
-          )}
-          {hasFailures && (
-            <ul className="list-disc pl-5">
-              {summary.failures.map((failure) => (
-                <li key={failure.jobId}>
-                  Job #{failure.jobId}: {failure.message}
-                </li>
-              ))}
-            </ul>
-          )}
+    <div className="grid gap-2">
+      <p>
+        {summary.successes.length} video(s) published to {" "}
+        {platformLabel(platform)}.
+        {hasFailures && ` ${summary.failures.length} video(s) failed.`}
+      </p>
+      {summary.successes.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {summary.successes.map((result) => (
+            <PublishedResultLink result={result} key={result.job_id} />
+          ))}
         </div>
-      </AlertDescription>
-    </Alert>
+      )}
+      {hasFailures && (
+        <ul className="list-disc pl-5">
+          {summary.failures.map((failure) => (
+            <li key={failure.jobId}>
+              Job #{failure.jobId}: {failure.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

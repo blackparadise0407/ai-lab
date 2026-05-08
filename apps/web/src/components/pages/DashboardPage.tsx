@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertCircle,
   Download,
   ExternalLink,
   Loader2,
@@ -16,6 +15,7 @@ import {
   targetLanguages,
 } from "../../constants/languages";
 import { formatDate, getErrorMessage } from "../../lib/format";
+import { useErrorToast } from "../../hooks/useErrorToast";
 import { cn } from "../../lib/utils";
 import type {
   Artifact,
@@ -36,7 +36,6 @@ import {
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
 import { EmptyState } from "../common/EmptyState";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button, buttonVariants } from "../ui/button";
 import {
@@ -288,6 +287,8 @@ export default function DashboardPage() {
       ? getErrorMessage(dashboardError, "Unable to refresh the dashboard.")
       : null);
 
+  useErrorToast(error, "Dashboard error");
+
   const activeStepIndex = useMemo(() => {
     if (!job) return -1;
     return statusOrder.indexOf(job.status);
@@ -352,14 +353,6 @@ export default function DashboardPage() {
           </CardHeader>
         </Card>
       </section>
-
-      {Boolean(error) && (
-        <Alert variant="destructive" className="mb-6 bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Dashboard error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
 
       <section className="mb-6 grid gap-6 lg:grid-cols-2">
         <Card className="bg-white/90 shadow-xl shadow-slate-900/5">

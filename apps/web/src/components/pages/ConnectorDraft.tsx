@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, Loader2, PlugZap, RefreshCw } from "lucide-react";
+import { Loader2, PlugZap, RefreshCw } from "lucide-react";
 
 import type { ConnectedAccount } from "../../interfaces/job";
 import { formatDate, getErrorMessage } from "../../lib/format";
+import { useErrorToast } from "../../hooks/useErrorToast";
 import {
   deleteConnectedAccount,
   getConnectedAccounts,
@@ -12,7 +13,6 @@ import {
 } from "../../services/api";
 import { EmptyState } from "../common/EmptyState";
 import { PageHeader } from "../common/PageHeader";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button, buttonVariants } from "../ui/button";
 import {
@@ -47,6 +47,8 @@ export function ConnectorDraft({ apiBaseUrl }: { apiBaseUrl: string }) {
         "Unable to load connected accounts.",
       )
     : actionError;
+
+  useErrorToast(error, "Connector error");
 
   useEffect(() => {
     const connectedAccountId = Number(searchParams.get("youtube_connected"));
@@ -104,14 +106,6 @@ export function ConnectorDraft({ apiBaseUrl }: { apiBaseUrl: string }) {
         title="Connected account settings"
         description="Connect and manage upload provider accounts outside the job dashboard, then use those providers when publishing completed videos."
       />
-
-      {Boolean(error) && (
-        <Alert variant="destructive" className="bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Connector error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
 
       <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
         <CardHeader>

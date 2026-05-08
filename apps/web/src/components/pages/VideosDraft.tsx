@@ -1,4 +1,4 @@
-import { AlertCircle, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { uploadPlatformOptions } from "../../constants/uploadPlatforms";
 import type {
@@ -8,9 +8,9 @@ import type {
   VideoSegment,
 } from "../../interfaces/job";
 import { formatDate, getErrorMessage } from "../../lib/format";
+import { useErrorToast } from "../../hooks/useErrorToast";
 import { EmptyState } from "../common/EmptyState";
 import { PageHeader } from "../common/PageHeader";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -54,6 +54,17 @@ export function VideosDraft({
   total: number;
   totalPages: number;
 }) {
+  useErrorToast(
+    error ? getErrorMessage(error, "Unable to load video collections.") : null,
+    "Videos error",
+  );
+  useErrorToast(
+    publishError
+      ? getErrorMessage(publishError, "Unable to publish this video.")
+      : null,
+    "Publish error",
+  );
+
   return (
     <section className="grid gap-6">
       <PageHeader
@@ -61,26 +72,6 @@ export function VideosDraft({
         title="Video collections"
         description="Manage each uploaded source video as a collection. Videos over 60 seconds are displayed as ordered chunks so each segment can be processed and published without losing the original grouping."
       />
-
-      {Boolean(error) && (
-        <Alert variant="destructive" className="bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Videos error</AlertTitle>
-          <AlertDescription>
-            {getErrorMessage(error, "Unable to load video collections.")}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {Boolean(publishError) && (
-        <Alert variant="destructive" className="bg-red-50">
-          <AlertCircle />
-          <AlertTitle>Publish error</AlertTitle>
-          <AlertDescription>
-            {getErrorMessage(publishError, "Unable to publish this video.")}
-          </AlertDescription>
-        </Alert>
-      )}
 
       <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
