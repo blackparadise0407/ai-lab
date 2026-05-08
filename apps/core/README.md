@@ -38,6 +38,8 @@ YOUTUBE_CLIENT_ID=
 YOUTUBE_CLIENT_SECRET=
 YOUTUBE_REDIRECT_URI=http://localhost:8000/v1/connectors/youtube/callback
 PUBLIC_API_BASE_URL=http://localhost:8000
+ALLOWED_BROWSER_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORE_DATABASE_URL=sqlite:///./core.db
 
 # Optional legacy single-account fallback for uploads without connected_account_id.
 YOUTUBE_REFRESH_TOKEN=
@@ -52,6 +54,9 @@ FACEBOOK_ACCESS_TOKEN=
 TIKTOK_UPLOAD_URL=
 TIKTOK_ACCESS_TOKEN=
 ```
+
+
+`ALLOWED_BROWSER_ORIGINS` is a comma-separated list of browser origins permitted by CORS. Keep the localhost defaults for development and set it to your deployed frontend origin for self-hosting, for example `https://your-domain.example`. `CORE_DATABASE_URL` defaults to `sqlite:///./core.db`; the self-host Compose setup uses `sqlite:////data/core.db` so the database lives in a persistent Docker volume.
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
 

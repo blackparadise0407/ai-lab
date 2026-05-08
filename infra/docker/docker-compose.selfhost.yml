@@ -1,0 +1,76 @@
+name: ai-lab
+
+services:
+  core:
+    build:
+      context: ../../apps/core
+      dockerfile: Dockerfile.selfhost
+    restart: unless-stopped
+    environment:
+      CORE_DATABASE_URL: ${CORE_DATABASE_URL:-sqlite:////data/core.db}
+      ALLOWED_BROWSER_ORIGINS: ${ALLOWED_BROWSER_ORIGINS:-http://localhost:8080}
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4.1-mini}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      DUB_TTS_CHUNK_BATCH_SIZE: ${DUB_TTS_CHUNK_BATCH_SIZE:-5}
+      DUB_TTS_CHUNK_MAX_ATTEMPTS: ${DUB_TTS_CHUNK_MAX_ATTEMPTS:-3}
+      DUB_TTS_CHUNK_RETRY_DELAY_SECONDS: ${DUB_TTS_CHUNK_RETRY_DELAY_SECONDS:-2}
+      DUB_PROVIDER_VOICE_CODE: ${DUB_PROVIDER_VOICE_CODE:-hn_female_ngochuyen_full_48k-fhg}
+      DUB_PROVIDER_URL: ${DUB_PROVIDER_URL:-}
+      DUB_PROVIDER_VOICES_URL: ${DUB_PROVIDER_VOICES_URL:-https://vbee.vn/api/public/v1/voices}
+      DUB_PROVIDER_VOICES_CACHE_TTL_SECONDS: ${DUB_PROVIDER_VOICES_CACHE_TTL_SECONDS:-86400}
+      DUB_PROVIDER_APP_ID: ${DUB_PROVIDER_APP_ID:-}
+      DUB_PROVIDER_TOKEN: ${DUB_PROVIDER_TOKEN:-}
+      YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
+      YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
+      YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-}
+      YOUTUBE_REFRESH_TOKEN: ${YOUTUBE_REFRESH_TOKEN:-}
+      YOUTUBE_TOKEN_URI: ${YOUTUBE_TOKEN_URI:-https://oauth2.googleapis.com/token}
+      YOUTUBE_TAGS: ${YOUTUBE_TAGS:-}
+      YOUTUBE_UPLOAD_CHUNK_SIZE: ${YOUTUBE_UPLOAD_CHUNK_SIZE:--1}
+      YOUTUBE_UPLOAD_MAX_RETRIES: ${YOUTUBE_UPLOAD_MAX_RETRIES:-10}
+      FACEBOOK_UPLOAD_URL: ${FACEBOOK_UPLOAD_URL:-}
+      FACEBOOK_ACCESS_TOKEN: ${FACEBOOK_ACCESS_TOKEN:-}
+      TIKTOK_UPLOAD_URL: ${TIKTOK_UPLOAD_URL:-}
+      TIKTOK_ACCESS_TOKEN: ${TIKTOK_ACCESS_TOKEN:-}
+    volumes:
+      - core-db:/data
+      - core-uploads:/workspace/uploads
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ../../apps/web
+      dockerfile: Dockerfile.selfhost
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8080}
+    restart: unless-stopped
+    depends_on:
+      - core
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - core
+      - web
+    environment:
+      AI_LAB_SITE_ADDRESS: ${AI_LAB_SITE_ADDRESS:-:80}
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+      - "${HTTPS_PORT:-8443}:443"
+    volumes:
+      - ../caddy/Caddyfile.selfhost:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  core-db:
+  core-uploads:
+  caddy-data:
+  caddy-config:

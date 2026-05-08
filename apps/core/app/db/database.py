@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -12,8 +14,8 @@ from app.models.entities import (  # noqa: F401
     VideoSegment,
 )
 
-SQLITE_URL = "sqlite:///./core.db"
-engine = create_engine(SQLITE_URL, connect_args={"check_same_thread": False})
+DATABASE_URL = os.getenv("CORE_DATABASE_URL", "sqlite:///./core.db")
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 
 def init_db() -> None:

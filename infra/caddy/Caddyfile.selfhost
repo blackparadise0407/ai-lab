@@ -1,0 +1,27 @@
+{$AI_LAB_SITE_ADDRESS} {
+    encode zstd gzip
+
+    handle /v1/* {
+        reverse_proxy core:8000
+    }
+
+    handle /health {
+        reverse_proxy core:8000
+    }
+
+    handle /swagger* {
+        reverse_proxy core:8000
+    }
+
+    handle /redoc* {
+        reverse_proxy core:8000
+    }
+
+    handle /openapi.json {
+        reverse_proxy core:8000
+    }
+
+    handle {
+        reverse_proxy web:80
+    }
+}
