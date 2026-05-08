@@ -34,6 +34,8 @@ class DubVoice:
     gender: str | None = None
     language: str | None = None
     accent: str | None = None
+    credit_factor: float | None = None
+    demo: str | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +219,8 @@ class DubProviderClient:
                     gender=self._first_string_value(raw_voice, "gender", "sex"),
                     language=self._first_string_value(raw_voice, "language", "lang", "locale"),
                     accent=self._first_string_value(raw_voice, "accent", "region"),
+                    credit_factor=self._first_number_value(raw_voice, "credit_factor", "creditFactor"),
+                    demo=self._first_string_value(raw_voice, "demo", "demo_url", "demoUrl"),
                 )
             )
         return voices
@@ -249,6 +253,20 @@ class DubProviderClient:
             string_value = str(value).strip()
             if string_value:
                 return string_value
+        return None
+
+    def _first_number_value(self, data: dict[object, object], *keys: str) -> float | None:
+        for key in keys:
+            value = data.get(key)
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                number_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number_value.is_integer():
+                return int(number_value)
+            return number_value
         return None
 
     def _get_default_voice_id(self) -> str:

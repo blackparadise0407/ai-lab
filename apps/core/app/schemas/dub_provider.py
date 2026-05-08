@@ -7,6 +7,8 @@ class DubVoiceResponse(BaseModel):
     gender: str | None = None
     language: str | None = None
     accent: str | None = None
+    credit_factor: float | None = None
+    demo: str | None = None
 
 
 class DubVoiceListResponse(BaseModel):
