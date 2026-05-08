@@ -495,7 +495,7 @@ export default function DashboardPage() {
                   </Button>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 items-start">
                 <div className="grid gap-2">
                   <Label htmlFor="output-video-speed">Output video speed</Label>
                   <Input
