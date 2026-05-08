@@ -80,12 +80,6 @@ const statusOrder: Job["status"][] = [
 
 const defaultVoiceValue = "__provider_default__";
 
-function formatVoiceLabel(voice: { name: string; credit_factor?: number | null }) {
-  return voice.credit_factor && voice.credit_factor > 1
-    ? `${voice.name} x${voice.credit_factor}`
-    : voice.name;
-}
-
 function getJobIdFromUrl() {
   const rawJobId = new URLSearchParams(window.location.search).get("jobId");
   if (!rawJobId) return null;
@@ -218,8 +212,14 @@ export default function DashboardPage() {
       }
 
       const parsedOutputVideoSpeed = Number(outputVideoSpeed);
-      if (!Number.isFinite(parsedOutputVideoSpeed) || parsedOutputVideoSpeed <= 0 || parsedOutputVideoSpeed > 4) {
-        throw new Error("Output video speed must be greater than 0 and no more than 4.");
+      if (
+        !Number.isFinite(parsedOutputVideoSpeed) ||
+        parsedOutputVideoSpeed <= 0 ||
+        parsedOutputVideoSpeed > 4
+      ) {
+        throw new Error(
+          "Output video speed must be greater than 0 and no more than 4.",
+        );
       }
 
       const parsedOriginalAudioVolume = Number(originalAudioVolume);
@@ -271,7 +271,8 @@ export default function DashboardPage() {
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
   const voices = voicesQuery.data?.items ?? [];
-  const selectedVoice = voices.find((voice) => voice.voice_id === voiceId) ?? null;
+  const selectedVoice =
+    voices.find((voice) => voice.voice_id === voiceId) ?? null;
   const isRefreshing =
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
@@ -423,7 +424,16 @@ export default function DashboardPage() {
                     </SelectItem>
                     {voices.map((voice) => (
                       <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                        {formatVoiceLabel(voice)}
+                        {voice.credit_factor && voice.credit_factor > 1 ? (
+                          <>
+                            {voice.name}
+                            <Badge variant="secondary">
+                              x{voice.credit_factor}
+                            </Badge>
+                          </>
+                        ) : (
+                          voice.name
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -432,11 +442,16 @@ export default function DashboardPage() {
                   <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
                     <div className="flex flex-wrap gap-x-3 gap-y-1">
                       <span className="font-medium text-foreground">
-                        {formatVoiceLabel(selectedVoice)}
+                        {selectedVoice.name}
                       </span>
-                      <span className="break-all">Code: {selectedVoice.voice_id}</span>
-                      {selectedVoice.credit_factor && selectedVoice.credit_factor > 1 ? (
-                        <span>Credit factor: x{selectedVoice.credit_factor}</span>
+                      <span className="break-all">
+                        Code: {selectedVoice.voice_id}
+                      </span>
+                      {selectedVoice.credit_factor &&
+                      selectedVoice.credit_factor > 1 ? (
+                        <span>
+                          Credit factor: x{selectedVoice.credit_factor}
+                        </span>
                       ) : null}
                     </div>
                     {selectedVoice.demo ? (
@@ -446,7 +461,11 @@ export default function DashboardPage() {
                         preload="none"
                         src={selectedVoice.demo}
                       >
-                        <a href={selectedVoice.demo} target="_blank" rel="noreferrer">
+                        <a
+                          href={selectedVoice.demo}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           Open voice demo
                         </a>
                       </audio>
@@ -470,10 +489,13 @@ export default function DashboardPage() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-xs"
-                    disabled={voicesQuery.isFetching || refreshVoicesMutation.isPending}
+                    disabled={
+                      voicesQuery.isFetching || refreshVoicesMutation.isPending
+                    }
                     onClick={() => refreshVoicesMutation.mutate()}
                   >
-                    {(voicesQuery.isFetching || refreshVoicesMutation.isPending) && (
+                    {(voicesQuery.isFetching ||
+                      refreshVoicesMutation.isPending) && (
                       <Loader2 className="animate-spin" />
                     )}
                     Refresh voices
@@ -490,14 +512,18 @@ export default function DashboardPage() {
                     max="4"
                     step="0.05"
                     value={outputVideoSpeed}
-                    onChange={(event) => setOutputVideoSpeed(event.target.value)}
+                    onChange={(event) =>
+                      setOutputVideoSpeed(event.target.value)
+                    }
                   />
                   <p className="text-xs text-muted-foreground">
                     Applied only during final muxing; default is 1x.
                   </p>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="original-audio-volume">Original audio volume</Label>
+                  <Label htmlFor="original-audio-volume">
+                    Original audio volume
+                  </Label>
                   <Input
                     id="original-audio-volume"
                     type="number"
@@ -505,7 +531,9 @@ export default function DashboardPage() {
                     max="1"
                     step="0.01"
                     value={originalAudioVolume}
-                    onChange={(event) => setOriginalAudioVolume(event.target.value)}
+                    onChange={(event) =>
+                      setOriginalAudioVolume(event.target.value)
+                    }
                   />
                   <p className="text-xs text-muted-foreground">
                     Mixed under the dub at the final step; default is 0.15.
