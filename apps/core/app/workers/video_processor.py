@@ -79,6 +79,8 @@ class VideoProcessingWorker:
                 return
             target_language = job.target_language
             voice_id = job.voice_id
+            output_video_speed = job.output_video_speed
+            original_audio_volume = job.original_audio_volume
 
             source_artifact = session.exec(
                 select(Artifact).where(
@@ -145,7 +147,14 @@ class VideoProcessingWorker:
             self._update_job_progress(session, job, "muxing", 85, status=JobStatus.FINALIZING)
 
         output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
-        self._mux_audio(source_video_path, tts_audio_path, translated_srt_path, output_path)
+        self._mux_audio(
+            source_video_path,
+            tts_audio_path,
+            translated_srt_path,
+            output_path,
+            output_video_speed=output_video_speed,
+            original_audio_volume=original_audio_volume,
+        )
 
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
@@ -505,12 +514,18 @@ class VideoProcessingWorker:
         return f"{tempo_filters},"
 
     def _split_atempo_factors(self, speedup: float) -> list[float]:
+        if speedup <= 0:
+            raise PipelineError("audio tempo speed must be positive")
+
         factors: list[float] = []
         remaining_speedup = speedup
         while remaining_speedup > 2.0:
             factors.append(2.0)
             remaining_speedup /= 2.0
-        if remaining_speedup > 1.000001:
+        while remaining_speedup < 0.5:
+            factors.append(0.5)
+            remaining_speedup /= 0.5
+        if abs(remaining_speedup - 1.0) > 0.000001:
             factors.append(remaining_speedup)
         return factors
 
@@ -539,11 +554,34 @@ class VideoProcessingWorker:
             raise PipelineError(f"audio duration probe returned non-positive duration for {audio_path}")
         return duration_seconds
 
-    def _mux_audio(self, source_video: Path, dubbed_audio: Path, subtitles: Path, output_video: Path) -> None:
+    def _mux_audio(
+        self,
+        source_video: Path,
+        dubbed_audio: Path,
+        subtitles: Path,
+        output_video: Path,
+        *,
+        output_video_speed: float = 1.0,
+        original_audio_volume: float = 0.15,
+    ) -> None:
+        if output_video_speed <= 0:
+            raise PipelineError("output_video_speed must be positive")
+        if original_audio_volume < 0:
+            raise PipelineError("original_audio_volume must be non-negative")
+
         subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=50"
         subtitle_filter = (
             f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
             f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
+        )
+        tempo_filter = self._build_tempo_filter(output_video_speed)
+        filter_complex = ";".join(
+            [
+                f"[0:v]{subtitle_filter},setpts=PTS/{output_video_speed:.6g}[vout]",
+                f"[0:a]volume={original_audio_volume:.6g},{tempo_filter}[aoriginal]",
+                f"[1:a]{tempo_filter}[adubbed]",
+                "[aoriginal][adubbed]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]",
+            ]
         )
         cmd = [
             "ffmpeg",
@@ -552,12 +590,12 @@ class VideoProcessingWorker:
             str(source_video),
             "-i",
             str(dubbed_audio),
+            "-filter_complex",
+            filter_complex,
             "-map",
-            "0:v:0",
+            "[vout]",
             "-map",
-            "1:a:0",
-            "-vf",
-            subtitle_filter,
+            "[aout]",
             "-c:v",
             "libx264",
             "-crf",
@@ -572,6 +610,11 @@ class VideoProcessingWorker:
             str(output_video),
         ]
         self._run_cmd(cmd, "audio/video/subtitle burn-in failed")
+
+    def _build_tempo_filter(self, speed: float) -> str:
+        if abs(speed - 1.0) <= 0.000001:
+            return "anull"
+        return ",".join(f"atempo={factor:.6g}" for factor in self._split_atempo_factors(speed))
 
     def _escape_ffmpeg_filter_path(self, path: Path) -> str:
         return "'" + str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:") + "'"

@@ -33,11 +33,23 @@ async function getResponseErrorMessage(response: Response) {
   return rawMessage;
 }
 
-export async function createJob(sourceLanguage: string, targetLanguage: string, voiceId?: string | null) {
+export async function createJob(
+  sourceLanguage: string,
+  targetLanguage: string,
+  voiceId?: string | null,
+  outputVideoSpeed = 1,
+  originalAudioVolume = 0.15,
+) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source_language: sourceLanguage, target_language: targetLanguage, voice_id: voiceId || null }),
+    body: JSON.stringify({
+      source_language: sourceLanguage,
+      target_language: targetLanguage,
+      voice_id: voiceId || null,
+      output_video_speed: outputVideoSpeed,
+      original_audio_volume: originalAudioVolume,
+    }),
   });
 
   return parseJsonResponse<Job>(response);

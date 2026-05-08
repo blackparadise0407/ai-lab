@@ -21,6 +21,8 @@ export interface Job {
   source_language: string;
   target_language: string;
   voice_id?: string | null;
+  output_video_speed: number;
+  original_audio_volume: number;
   status: JobStatus;
   current_step?: string | null;
   progress_percent: number;
@@ -121,6 +123,8 @@ export interface VideoCollection {
   source_language: string;
   target_language: string;
   voice_id?: string | null;
+  output_video_speed: number;
+  original_audio_volume: number;
   source_artifact_id?: number | null;
   total_duration_seconds?: number | null;
   split_threshold_seconds: number;
@@ -148,6 +152,8 @@ export interface VideoCollectionCreateRequest {
   source_language: string;
   target_language: string;
   voice_id?: string | null;
+  output_video_speed?: number;
+  original_audio_volume?: number;
   split_threshold_seconds?: number;
 }
 

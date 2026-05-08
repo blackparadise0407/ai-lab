@@ -58,7 +58,7 @@ def test_list_jobs_supports_status_filter_and_pagination() -> None:
     ]
 
 
-def test_create_job_accepts_voice_id() -> None:
+def test_create_job_accepts_voice_id_and_output_video_config() -> None:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -79,6 +79,8 @@ def test_create_job_accepts_voice_id() -> None:
                 "source_language": "zh",
                 "target_language": "vi",
                 "voice_id": "voice-one",
+                "output_video_speed": 1.25,
+                "original_audio_volume": 0.2,
             },
         )
     finally:
@@ -86,3 +88,5 @@ def test_create_job_accepts_voice_id() -> None:
 
     assert response.status_code == 201
     assert response.json()["voice_id"] == "voice-one"
+    assert response.json()["output_video_speed"] == 1.25
+    assert response.json()["original_audio_volume"] == 0.2

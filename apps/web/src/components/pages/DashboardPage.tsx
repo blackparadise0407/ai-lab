@@ -110,6 +110,8 @@ export default function DashboardPage() {
   const [sourceLanguage, setSourceLanguage] = useState("zh");
   const [targetLanguage, setTargetLanguage] = useState("vi");
   const [voiceId, setVoiceId] = useState("");
+  const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
+  const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
   const [file, setFile] = useState<File | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(() =>
     getJobIdFromUrl(),
@@ -206,11 +208,27 @@ export default function DashboardPage() {
         throw new Error("Choose a source video before creating a collection.");
       }
 
+      const parsedOutputVideoSpeed = Number(outputVideoSpeed);
+      if (!Number.isFinite(parsedOutputVideoSpeed) || parsedOutputVideoSpeed <= 0 || parsedOutputVideoSpeed > 4) {
+        throw new Error("Output video speed must be greater than 0 and no more than 4.");
+      }
+
+      const parsedOriginalAudioVolume = Number(originalAudioVolume);
+      if (
+        !Number.isFinite(parsedOriginalAudioVolume) ||
+        parsedOriginalAudioVolume < 0 ||
+        parsedOriginalAudioVolume > 1
+      ) {
+        throw new Error("Original audio volume must be between 0 and 1.");
+      }
+
       const collection = await createVideoCollection({
         source_language: sourceLanguage,
         target_language: targetLanguage,
         title: file.name,
         voice_id: voiceId || null,
+        output_video_speed: parsedOutputVideoSpeed,
+        original_audio_volume: parsedOriginalAudioVolume,
         split_threshold_seconds: 60,
       });
       return uploadVideoCollectionSource(collection.id, file);
@@ -440,6 +458,38 @@ export default function DashboardPage() {
                   </Button>
                 </div>
               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="output-video-speed">Output video speed</Label>
+                  <Input
+                    id="output-video-speed"
+                    type="number"
+                    min="0.1"
+                    max="4"
+                    step="0.05"
+                    value={outputVideoSpeed}
+                    onChange={(event) => setOutputVideoSpeed(event.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Applied only during final muxing; default is 1x.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="original-audio-volume">Original audio volume</Label>
+                  <Input
+                    id="original-audio-volume"
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={originalAudioVolume}
+                    onChange={(event) => setOriginalAudioVolume(event.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Mixed under the dub at the final step; default is 0.15.
+                  </p>
+                </div>
+              </div>
               <div className="grid gap-2">
                 <Label htmlFor="source-video">Source video</Label>
                 <Input
@@ -557,6 +607,12 @@ export default function DashboardPage() {
                 </Badge>
                 <Badge variant="secondary">
                   Voice {job.voice_id || "provider default"}
+                </Badge>
+                <Badge variant="secondary">
+                  Speed {job.output_video_speed}x
+                </Badge>
+                <Badge variant="secondary">
+                  Original volume {job.original_audio_volume}
                 </Badge>
                 <Badge variant="secondary">
                   {job.progress_percent}% complete
