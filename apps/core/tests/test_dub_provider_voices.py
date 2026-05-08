@@ -33,6 +33,8 @@ def test_list_voices_normalizes_and_caches_provider_response() -> None:
                     "gender": "female",
                     "language": "vi",
                     "accent": "northern",
+                    "credit_factor": 2,
+                    "demo": "https://example.com/demo.mp3",
                 }
             ]
         },
@@ -51,6 +53,8 @@ def test_list_voices_normalizes_and_caches_provider_response() -> None:
     assert first_result.voices[0].gender == "female"
     assert first_result.voices[0].language == "vi"
     assert first_result.voices[0].accent == "northern"
+    assert first_result.voices[0].credit_factor == 2
+    assert first_result.voices[0].demo == "https://example.com/demo.mp3"
 
 
 def test_list_voices_force_refresh_bypasses_cache() -> None:

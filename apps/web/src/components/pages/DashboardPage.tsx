@@ -46,6 +46,13 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Progress } from "../ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 const statusLabels: Record<Job["status"], string> = {
   created: "Created",
@@ -66,6 +73,14 @@ const statusOrder: Job["status"][] = [
   "finalizing",
   "completed",
 ];
+
+const defaultVoiceValue = "__provider_default__";
+
+function formatVoiceLabel(voice: { name: string; credit_factor?: number | null }) {
+  return voice.credit_factor && voice.credit_factor > 1
+    ? `${voice.name} x${voice.credit_factor}`
+    : voice.name;
+}
 
 function getJobIdFromUrl() {
   const rawJobId = new URLSearchParams(window.location.search).get("jobId");
@@ -229,6 +244,7 @@ export default function DashboardPage() {
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
   const voices = voicesQuery.data?.items ?? [];
+  const selectedVoice = voices.find((voice) => voice.voice_id === voiceId) ?? null;
   const isRefreshing =
     jobQuery.isFetching ||
     artifactsQuery.isFetching ||
@@ -351,20 +367,54 @@ export default function DashboardPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="voice-id">Voice</Label>
-                <select
-                  id="voice-id"
-                  className="border-input focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                  value={voiceId}
+                <Select
+                  value={voiceId || defaultVoiceValue}
                   disabled={voicesQuery.isLoading}
-                  onChange={(event) => setVoiceId(event.target.value)}
+                  onValueChange={(value) =>
+                    setVoiceId(value === defaultVoiceValue ? "" : value)
+                  }
                 >
-                  <option value="">Default provider voice</option>
-                  {voices.map((voice) => (
-                    <option key={voice.voice_id} value={voice.voice_id}>
-                      {voice.name} ({voice.voice_id})
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="voice-id">
+                    <SelectValue placeholder="Default provider voice" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={defaultVoiceValue}>
+                      Default provider voice
+                    </SelectItem>
+                    {voices.map((voice) => (
+                      <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                        {formatVoiceLabel(voice)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedVoice && (
+                  <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1">
+                      <span className="font-medium text-foreground">
+                        {formatVoiceLabel(selectedVoice)}
+                      </span>
+                      <span className="break-all">Code: {selectedVoice.voice_id}</span>
+                      {selectedVoice.credit_factor && selectedVoice.credit_factor > 1 ? (
+                        <span>Credit factor: x{selectedVoice.credit_factor}</span>
+                      ) : null}
+                    </div>
+                    {selectedVoice.demo ? (
+                      <audio
+                        className="h-9 w-full"
+                        controls
+                        preload="none"
+                        src={selectedVoice.demo}
+                      >
+                        <a href={selectedVoice.demo} target="_blank" rel="noreferrer">
+                          Open voice demo
+                        </a>
+                      </audio>
+                    ) : (
+                      <span>No demo preview is available for this voice.</span>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>
                     {voicesQuery.isLoading
