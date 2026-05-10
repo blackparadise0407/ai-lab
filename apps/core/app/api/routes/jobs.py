@@ -15,6 +15,7 @@ from app.models.entities import (
     VideoSegment,
 )
 from app.schemas.jobs import JobCreateRequest, JobListResponse, JobResponse
+from app.services.deletion import delete_job_and_artifacts
 from app.services.video_collections import refresh_collection_rollup
 from app.workers.video_processor import video_processing_worker
 
@@ -156,6 +157,21 @@ def retry_job(job_id: int, session: Session = Depends(get_session)):
     job_update_broker.notify(job.id, "job_retry_queued")
     video_processing_worker.enqueue(job_id=job.id, retry_from_step=retry_from_step)
     return job
+
+
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    summary="Delete job",
+    description="Deletes a job, its provider request history, database artifact records, and local artifact files.",
+)
+def delete_job(job_id: int, session: Session = Depends(get_session)):
+    job = session.exec(select(Job).where(Job.id == job_id)).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    delete_job_and_artifacts(session, job)
+    return None
 
 
 @router.get(
