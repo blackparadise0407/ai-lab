@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.entities import JobStatus
 from app.schemas.jobs import JobResponse
@@ -11,10 +11,19 @@ class VideoCollectionCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", min_length=2, max_length=8)
     target_language: str = Field(default="vi", min_length=2, max_length=8)
+    translation_context: Optional[str] = Field(default=None, max_length=100)
     voice_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     output_video_speed: float = Field(default=1.0, gt=0, le=4)
     original_audio_volume: float = Field(default=0.15, ge=0, le=1)
     split_threshold_seconds: int = Field(default=60, ge=1, le=600)
+
+    @field_validator("translation_context", mode="before")
+    @classmethod
+    def normalize_translation_context(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class VideoCollectionResponse(BaseModel):
@@ -24,6 +33,7 @@ class VideoCollectionResponse(BaseModel):
     original_filename: Optional[str] = None
     source_language: str
     target_language: str
+    translation_context: Optional[str] = None
     voice_id: Optional[str] = None
     output_video_speed: float
     original_audio_volume: float

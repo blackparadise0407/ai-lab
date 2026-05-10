@@ -29,6 +29,7 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
         external_job_id=f"job_{uuid4().hex[:12]}",
         source_language=payload.source_language,
         target_language=payload.target_language,
+        translation_context=payload.translation_context,
         voice_id=payload.voice_id,
         output_video_speed=payload.output_video_speed,
         original_audio_volume=payload.original_audio_volume,

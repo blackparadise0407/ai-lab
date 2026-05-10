@@ -5,7 +5,7 @@ from pathlib import Path
 from app.workers.video_processor import VideoProcessingWorker
 
 
-def capture_merge_filter(worker: VideoProcessingWorker, tmp_path: Path) -> str:
+def capture_merge_command(worker: VideoProcessingWorker, tmp_path: Path) -> list[str]:
     captured: dict[str, list[str]] = {}
 
     def capture_cmd(cmd: list[str], error_message: str) -> None:
@@ -23,32 +23,33 @@ def capture_merge_filter(worker: VideoProcessingWorker, tmp_path: Path) -> str:
         tmp_path / "dubbed.wav",
     )
 
-    return captured["cmd"][captured["cmd"].index("-filter_complex") + 1]
+    return captured["cmd"]
 
 
-def test_merge_tts_chunks_disables_amix_normalization_to_prevent_volume_ramp(tmp_path) -> None:
+def test_merge_tts_chunks_concatenates_sequentially_with_sentence_breaks(
+    tmp_path,
+) -> None:
     worker = VideoProcessingWorker()
-    worker._probe_audio_duration_seconds = lambda _chunk_path: 1.0  # type: ignore[method-assign]
 
-    filter_complex = capture_merge_filter(worker, tmp_path)
+    cmd = capture_merge_command(worker, tmp_path)
+    filter_complex = cmd[cmd.index("-filter_complex") + 1]
 
-    assert "amix=inputs=3:duration=longest:dropout_transition=0:normalize=0" in filter_complex
+    assert "-t" in cmd
+    assert cmd[cmd.index("-t") + 1] == "0.300"
+    assert "anullsrc=r=48000:cl=stereo" in cmd
+    assert "asplit=3[s0][s1][s2]" in filter_complex
+    assert "[a0][s0][a1][s1][a2][s2]concat=n=6:v=0:a=1" in filter_complex
 
 
-def test_merge_tts_chunks_speeds_up_long_chunks_without_pitch_shift(tmp_path) -> None:
+def test_merge_tts_chunks_does_not_speed_up_long_chunks(tmp_path) -> None:
     worker = VideoProcessingWorker()
-    durations = {
-        Path("chunk_0001.wav"): 1.0,
-        Path("chunk_0002.wav"): 1.5,
-        Path("chunk_0003.wav"): 4.5,
-    }
-    worker._probe_audio_duration_seconds = lambda chunk_path: durations[chunk_path]  # type: ignore[method-assign]
 
-    filter_complex = capture_merge_filter(worker, tmp_path)
+    cmd = capture_merge_command(worker, tmp_path)
+    filter_complex = cmd[cmd.index("-filter_complex") + 1]
 
-    assert "[0:a]adelay=0:all=1[a0]" in filter_complex
-    assert "[1:a]atempo=1.5,adelay=1000:all=1[a1]" in filter_complex
-    assert "[2:a]atempo=2,atempo=2,atempo=1.125,adelay=2000:all=1[a2]" in filter_complex
+    assert "atempo" not in filter_complex
+    assert "adelay" not in filter_complex
+    assert "amix" not in filter_complex
 
 
 def test_mux_audio_applies_output_speed_and_original_audio_volume(tmp_path) -> None:
@@ -76,7 +77,10 @@ def test_mux_audio_applies_output_speed_and_original_audio_volume(tmp_path) -> N
     assert "setpts=PTS/1.5[vout]" in filter_complex
     assert "[0:a]volume=0.2,atempo=1.5[aoriginal]" in filter_complex
     assert "[1:a]atempo=1.5[adubbed]" in filter_complex
-    assert "[aoriginal][adubbed]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]" in filter_complex
+    assert (
+        "[aoriginal][adubbed]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]"
+        in filter_complex
+    )
     assert cmd[cmd.index("-map") + 1] == "[vout]"
 
 

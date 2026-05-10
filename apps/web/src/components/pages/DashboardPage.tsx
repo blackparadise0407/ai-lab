@@ -108,6 +108,7 @@ export default function DashboardPage() {
   const [targetLanguage, setTargetLanguage] = useState(
     DEFAULT_TARGET_LANGUAGE_CODE,
   );
+  const [translationContext, setTranslationContext] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
   const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
@@ -230,9 +231,15 @@ export default function DashboardPage() {
         throw new Error("Original audio volume must be between 0 and 1.");
       }
 
+      const trimmedTranslationContext = translationContext.trim();
+      if (trimmedTranslationContext.length > 100) {
+        throw new Error("Translation context must be 100 characters or fewer.");
+      }
+
       const collection = await createVideoCollection({
         source_language: sourceLanguage,
         target_language: targetLanguage,
+        translation_context: trimmedTranslationContext || null,
         title: file.name,
         voice_id: voiceId || null,
         output_video_speed: parsedOutputVideoSpeed,
@@ -398,6 +405,24 @@ export default function DashboardPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="translation-context">Translation context</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {translationContext.length}/100
+                  </span>
+                </div>
+                <Input
+                  id="translation-context"
+                  maxLength={100}
+                  placeholder="Optional: names, tone, topic"
+                  value={translationContext}
+                  onChange={(event) => setTranslationContext(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Added to the translation prompt to preserve wording, tone, and names.
+                </p>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="voice-id">Voice</Label>
@@ -648,6 +673,11 @@ export default function DashboardPage() {
                   {job.source_language.toUpperCase()} →{" "}
                   {job.target_language.toUpperCase()}
                 </Badge>
+                {job.translation_context && (
+                  <Badge variant="secondary">
+                    Context {job.translation_context}
+                  </Badge>
+                )}
                 <Badge variant="secondary">
                   Voice {job.voice_id || "provider default"}
                 </Badge>

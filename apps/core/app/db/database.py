@@ -30,18 +30,48 @@ def _ensure_sqlite_columns() -> None:
         for table_name in inspector.get_table_names()
     }
     alter_statements = []
+    if "job" in table_columns and "translation_context" not in table_columns["job"]:
+        alter_statements.append(
+            "ALTER TABLE job ADD COLUMN translation_context VARCHAR(100)"
+        )
     if "job" in table_columns and "voice_id" not in table_columns["job"]:
         alter_statements.append("ALTER TABLE job ADD COLUMN voice_id VARCHAR(128)")
     if "job" in table_columns and "output_video_speed" not in table_columns["job"]:
-        alter_statements.append("ALTER TABLE job ADD COLUMN output_video_speed FLOAT NOT NULL DEFAULT 1.0")
+        alter_statements.append(
+            "ALTER TABLE job ADD COLUMN output_video_speed FLOAT NOT NULL DEFAULT 1.0"
+        )
     if "job" in table_columns and "original_audio_volume" not in table_columns["job"]:
-        alter_statements.append("ALTER TABLE job ADD COLUMN original_audio_volume FLOAT NOT NULL DEFAULT 0.15")
-    if "videocollection" in table_columns and "voice_id" not in table_columns["videocollection"]:
-        alter_statements.append("ALTER TABLE videocollection ADD COLUMN voice_id VARCHAR(128)")
-    if "videocollection" in table_columns and "output_video_speed" not in table_columns["videocollection"]:
-        alter_statements.append("ALTER TABLE videocollection ADD COLUMN output_video_speed FLOAT NOT NULL DEFAULT 1.0")
-    if "videocollection" in table_columns and "original_audio_volume" not in table_columns["videocollection"]:
-        alter_statements.append("ALTER TABLE videocollection ADD COLUMN original_audio_volume FLOAT NOT NULL DEFAULT 0.15")
+        alter_statements.append(
+            "ALTER TABLE job ADD COLUMN original_audio_volume FLOAT NOT NULL DEFAULT 0.15"
+        )
+    if (
+        "videocollection" in table_columns
+        and "translation_context" not in table_columns["videocollection"]
+    ):
+        alter_statements.append(
+            "ALTER TABLE videocollection ADD COLUMN translation_context VARCHAR(100)"
+        )
+    if (
+        "videocollection" in table_columns
+        and "voice_id" not in table_columns["videocollection"]
+    ):
+        alter_statements.append(
+            "ALTER TABLE videocollection ADD COLUMN voice_id VARCHAR(128)"
+        )
+    if (
+        "videocollection" in table_columns
+        and "output_video_speed" not in table_columns["videocollection"]
+    ):
+        alter_statements.append(
+            "ALTER TABLE videocollection ADD COLUMN output_video_speed FLOAT NOT NULL DEFAULT 1.0"
+        )
+    if (
+        "videocollection" in table_columns
+        and "original_audio_volume" not in table_columns["videocollection"]
+    ):
+        alter_statements.append(
+            "ALTER TABLE videocollection ADD COLUMN original_audio_volume FLOAT NOT NULL DEFAULT 0.15"
+        )
 
     if not alter_statements:
         return
