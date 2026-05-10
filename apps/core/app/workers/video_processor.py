@@ -5,7 +5,6 @@ import logging
 import os
 import queue
 import re
-import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -17,7 +16,13 @@ from faster_whisper import WhisperModel
 
 from app.api.job_updates import job_update_broker
 from app.db.database import engine
-from app.models.entities import Artifact, Job, JobStatus, ProviderRequest, ProviderRequestStatus
+from app.models.entities import (
+    Artifact,
+    Job,
+    JobStatus,
+    ProviderRequest,
+    ProviderRequestStatus,
+)
 from app.utils import run_cmd
 from app.providers.dub_provider import DubProviderClient, TtsChunkRequest
 
@@ -39,7 +44,9 @@ class VideoProcessingWorker:
     def __init__(self) -> None:
         self._queue: queue.Queue[int] = queue.Queue()
         self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="video-processing-worker", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name="video-processing-worker", daemon=True
+        )
         self._dub_provider = DubProviderClient()
 
     def start(self) -> None:
@@ -129,7 +136,13 @@ class VideoProcessingWorker:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
-            self._update_job_progress(session, job, "synthesizing_chunks", 65, status=JobStatus.WAITING_PROVIDER)
+            self._update_job_progress(
+                session,
+                job,
+                "synthesizing_chunks",
+                65,
+                status=JobStatus.WAITING_PROVIDER,
+            )
 
         tts_audio_path, provider_request_ids = self._synthesize_dubbed_audio_from_srt(
             job_id,
@@ -144,7 +157,9 @@ class VideoProcessingWorker:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
-            self._update_job_progress(session, job, "muxing", 85, status=JobStatus.FINALIZING)
+            self._update_job_progress(
+                session, job, "muxing", 85, status=JobStatus.FINALIZING
+            )
 
         output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
         self._mux_audio(
@@ -161,9 +176,19 @@ class VideoProcessingWorker:
             if not job:
                 return
 
-            self._upsert_artifact(session, job_id, PROCESSED_ARTIFACT_TYPE, output_path, "video/mp4")
-            self._upsert_artifact(session, job_id, SRT_ARTIFACT_TYPE, translated_srt_path, "application/x-subrip")
-            self._upsert_artifact(session, job_id, TTS_AUDIO_ARTIFACT_TYPE, tts_audio_path, "audio/wav")
+            self._upsert_artifact(
+                session, job_id, PROCESSED_ARTIFACT_TYPE, output_path, "video/mp4"
+            )
+            self._upsert_artifact(
+                session,
+                job_id,
+                SRT_ARTIFACT_TYPE,
+                translated_srt_path,
+                "application/x-subrip",
+            )
+            self._upsert_artifact(
+                session, job_id, TTS_AUDIO_ARTIFACT_TYPE, tts_audio_path, "audio/wav"
+            )
 
             job.status = JobStatus.COMPLETED
             job.current_step = "done"
@@ -251,7 +276,9 @@ class VideoProcessingWorker:
             blocks.append((sequence, timing, text))
         return blocks
 
-    def _build_translation_cues(self, blocks: list[tuple[str, str, str]]) -> list[dict[str, object]]:
+    def _build_translation_cues(
+        self, blocks: list[tuple[str, str, str]]
+    ) -> list[dict[str, object]]:
         cues: list[dict[str, object]] = []
         for index, (_sequence, timing, text) in enumerate(blocks):
             start_time, end_time = self._parse_srt_timing_range(timing)
@@ -290,21 +317,28 @@ class VideoProcessingWorker:
                                 "1. Return ONLY a JSON array of strings — no markdown, no extra keys, no prose.\n"
                                 "2. The output array MUST contain exactly the same number of elements as the input array.\n"
                                 "3. Element at index N in the output is the translation for cue index N — never merge, split, reorder, or omit cues.\n"
-                                "4. TIMESTAMP FIT (highest priority): Each translation must be short enough to be spoken naturally inside that cue's `duration_seconds` SRT timestamp window. "
+                                "4. SRT MATCH (highest priority): Keep each translation aligned with its original cue boundary, timing, and spoken rhythm. "
+                                "Do not move meaning from one cue to another, and keep roughly the same information density as the source cue whenever possible.\n"
+                                "5. TIMESTAMP FIT: Each translation must be short enough to be spoken naturally inside that cue's `duration_seconds` SRT timestamp window. "
                                 "For very short cues, use concise phrasing; for longer cues, keep the full thought but avoid unnecessary padding. "
-                                "Prefer shorter synonyms, contractions, pronouns, or natural ellipsis over literal wording when needed to fit.\n"
-                                f"5. NATURALNESS AND COHERENCE: Within the timestamp fit constraint, write fluent, idiomatic {target_language} with a natural spoken tone. "
+                                "Prefer shorter synonyms, pronouns, or natural ellipsis over literal wording when needed to fit.\n"
+                                f"6. NATURALNESS AND COHERENCE: Within the SRT-match and timestamp-fit constraints, write fluent, idiomatic {target_language} with a natural spoken tone. "
                                 "Use nearby cues as context so pronouns, formality, and transitions remain coherent, but keep each cue self-contained.\n"
-                                "6. Preserve the original meaning, intent, and emotional tone as closely as possible given constraints 4 and 5.\n"
-                                "7. Do not add explanations, speaker labels, parentheticals, or content that was not implied by the source.\n"
-                                "8. If a cue cannot be translated (e.g. it is already in the target language), copy its text verbatim."
+                                "7. Preserve the original meaning, intent, and emotional tone as closely as possible given constraints 4-6.\n"
+                                "8. Do not add explanations, speaker labels, parentheticals, or content that was not implied by the source.\n"
+                                "9. If a cue cannot be translated (e.g. it is already in the target language), copy its text verbatim."
                             ),
                         }
                     ],
                 },
                 {
                     "role": "user",
-                    "content": [{"type": "input_text", "text": json.dumps(cues, ensure_ascii=False)}],
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": json.dumps(cues, ensure_ascii=False),
+                        }
+                    ],
                 },
             ],
         }
@@ -328,7 +362,9 @@ class VideoProcessingWorker:
         if not translated_raw:
             raise PipelineError("OpenAI translation returned empty output_text")
 
-        translated = self._parse_openai_translations(translated_raw, expected_count=len(cues))
+        translated = self._parse_openai_translations(
+            translated_raw, expected_count=len(cues)
+        )
         if translated is None:
             raise PipelineError("OpenAI translation output was not valid JSON")
 
@@ -337,11 +373,14 @@ class VideoProcessingWorker:
             raise PipelineError("OpenAI translation produced empty subtitle lines")
         return normalized
 
-
-    def _parse_openai_translations(self, translated_raw: str, expected_count: int) -> list[str] | None:
+    def _parse_openai_translations(
+        self, translated_raw: str, expected_count: int
+    ) -> list[str] | None:
         parsed = self._json_load_list(translated_raw)
         if parsed is None:
-            parsed = self._json_load_list(self._strip_markdown_code_fences(translated_raw))
+            parsed = self._json_load_list(
+                self._strip_markdown_code_fences(translated_raw)
+            )
 
         if parsed is None:
             return None
@@ -350,7 +389,9 @@ class VideoProcessingWorker:
             return parsed
 
         if expected_count == 1:
-            return ["\n".join(str(item).strip() for item in parsed if str(item).strip())]
+            return [
+                "\n".join(str(item).strip() for item in parsed if str(item).strip())
+            ]
 
         return None
 
@@ -431,11 +472,17 @@ class VideoProcessingWorker:
         return total_seconds
 
     def _synthesize_dubbed_audio_from_srt(
-        self, job_id: int, translated_srt: str, job_work_dir: Path, voice_id: str | None = None
+        self,
+        job_id: int,
+        translated_srt: str,
+        job_work_dir: Path,
+        voice_id: str | None = None,
     ) -> tuple[Path, list[str]]:
         blocks = self._parse_srt_blocks(translated_srt)
         if not blocks:
-            raise PipelineError("Translated SRT has no usable subtitle blocks for chunked synthesis")
+            raise PipelineError(
+                "Translated SRT has no usable subtitle blocks for chunked synthesis"
+            )
 
         chunks_dir = job_work_dir / "tts_chunks"
         chunks_dir.mkdir(parents=True, exist_ok=True)
@@ -458,37 +505,61 @@ class VideoProcessingWorker:
             )
             chunk_specs.append((start_time, end_time, chunk_audio_path))
 
-        provider_request_ids = self._dub_provider.synthesize_chunks(job_id, chunk_requests)
+        provider_request_ids = self._dub_provider.synthesize_chunks(
+            job_id, chunk_requests
+        )
         output_audio = job_work_dir / "dubbed.wav"
         self._merge_tts_chunks(chunk_specs, output_audio)
         return output_audio, provider_request_ids
 
-    def _merge_tts_chunks(self, chunk_specs: list[tuple[float, float, Path]], output_audio: Path) -> None:
+    def _merge_tts_chunks(
+        self, chunk_specs: list[tuple[float, float, Path]], output_audio: Path
+    ) -> None:
         if not chunk_specs:
             raise PipelineError("No TTS chunks were generated")
 
+        sentence_break_seconds = 0.3
         cmd = ["ffmpeg", "-y"]
-        filter_parts: list[str] = []
-        mixed_labels: list[str] = []
-        for input_index, (start_time, end_time, chunk_path) in enumerate(chunk_specs):
+        for _start_time, _end_time, chunk_path in chunk_specs:
             cmd.extend(["-i", str(chunk_path)])
-            delay_ms = int(round(max(0.0, start_time) * 1000))
-            target_duration_seconds = max(0.1, end_time - start_time)
-            tempo_filter = self._build_speedup_filter(chunk_path, target_duration_seconds)
-            delayed_label = f"a{input_index}"
-            filter_parts.append(f"[{input_index}:a]{tempo_filter}adelay={delay_ms}:all=1[{delayed_label}]")
-            mixed_labels.append(f"[{delayed_label}]")
+        cmd.extend(
+            [
+                "-f",
+                "lavfi",
+                "-t",
+                f"{sentence_break_seconds:.3f}",
+                "-i",
+                "anullsrc=r=48000:cl=stereo",
+            ]
+        )
 
-        if len(mixed_labels) == 1:
-            filter_parts.append(f"{mixed_labels[0]}aresample=48000[aout]")
-        else:
-            # Keep amix normalization disabled so delayed-but-not-yet-playing chunks do not
-            # get counted as silent active inputs and make the dub level ramp up over time.
-            amix_filter = (
-                f"amix=inputs={len(mixed_labels)}:duration=longest:"
-                "dropout_transition=0:normalize=0"
+        filter_parts: list[str] = []
+        concat_labels: list[str] = []
+        audio_format = (
+            "aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo"
+        )
+        silence_labels = [f"s{input_index}" for input_index in range(len(chunk_specs))]
+        if len(silence_labels) == 1:
+            filter_parts.append(
+                f"[{len(chunk_specs)}:a]{audio_format}[{silence_labels[0]}]"
             )
-            filter_parts.append("".join(mixed_labels) + f"{amix_filter},aresample=48000[aout]")
+        else:
+            silence_outputs = "".join(f"[{label}]" for label in silence_labels)
+            filter_parts.append(
+                f"[{len(chunk_specs)}:a]{audio_format},asplit={len(chunk_specs)}{silence_outputs}"
+            )
+
+        for input_index, _chunk_spec in enumerate(chunk_specs):
+            chunk_label = f"a{input_index}"
+            filter_parts.append(f"[{input_index}:a]{audio_format}[{chunk_label}]")
+            concat_labels.extend(
+                [f"[{chunk_label}]", f"[{silence_labels[input_index]}]"]
+            )
+
+        filter_parts.append(
+            "".join(concat_labels)
+            + f"concat=n={len(concat_labels)}:v=0:a=1,aresample=48000[aout]"
+        )
 
         cmd.extend(
             [
@@ -502,16 +573,6 @@ class VideoProcessingWorker:
             ]
         )
         self._run_cmd(cmd, "TTS chunk merge failed")
-
-    def _build_speedup_filter(self, chunk_path: Path, target_duration_seconds: float) -> str:
-        actual_duration_seconds = self._probe_audio_duration_seconds(chunk_path)
-        if actual_duration_seconds <= target_duration_seconds + 0.02:
-            return ""
-
-        speedup = actual_duration_seconds / target_duration_seconds
-        # atempo changes playback tempo while preserving pitch, avoiding chipmunk-like voices.
-        tempo_filters = ",".join(f"atempo={factor:.6g}" for factor in self._split_atempo_factors(speedup))
-        return f"{tempo_filters},"
 
     def _split_atempo_factors(self, speedup: float) -> list[float]:
         if speedup <= 0:
@@ -528,31 +589,6 @@ class VideoProcessingWorker:
         if abs(remaining_speedup - 1.0) > 0.000001:
             factors.append(remaining_speedup)
         return factors
-
-    def _probe_audio_duration_seconds(self, audio_path: Path) -> float:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(audio_path),
-        ]
-        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if process.returncode != 0:
-            details = process.stderr.strip() or process.stdout.strip()
-            raise PipelineError(f"audio duration probe failed: {details}")
-
-        try:
-            duration_seconds = float(json.loads(process.stdout)["format"]["duration"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise PipelineError(f"audio duration probe returned invalid output for {audio_path}") from exc
-
-        if duration_seconds <= 0:
-            raise PipelineError(f"audio duration probe returned non-positive duration for {audio_path}")
-        return duration_seconds
 
     def _mux_audio(
         self,
@@ -614,10 +650,16 @@ class VideoProcessingWorker:
     def _build_tempo_filter(self, speed: float) -> str:
         if abs(speed - 1.0) <= 0.000001:
             return "anull"
-        return ",".join(f"atempo={factor:.6g}" for factor in self._split_atempo_factors(speed))
+        return ",".join(
+            f"atempo={factor:.6g}" for factor in self._split_atempo_factors(speed)
+        )
 
     def _escape_ffmpeg_filter_path(self, path: Path) -> str:
-        return "'" + str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:") + "'"
+        return (
+            "'"
+            + str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+            + "'"
+        )
 
     def _escape_ffmpeg_filter_value(self, value: str) -> str:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
@@ -625,9 +667,13 @@ class VideoProcessingWorker:
     def _run_cmd(self, cmd: list[str], error_message: str) -> None:
         run_cmd(cmd, error_message, PipelineError)
 
-    def _upsert_provider_request(self, session: Session, job_id: int, provider_request_id: str) -> None:
+    def _upsert_provider_request(
+        self, session: Session, job_id: int, provider_request_id: str
+    ) -> None:
         provider_request = session.exec(
-            select(ProviderRequest).where(ProviderRequest.provider_request_id == provider_request_id)
+            select(ProviderRequest).where(
+                ProviderRequest.provider_request_id == provider_request_id
+            )
         ).first()
         if provider_request:
             provider_request.status = ProviderRequestStatus.SUCCEEDED
@@ -645,9 +691,18 @@ class VideoProcessingWorker:
         session.commit()
         job_update_broker.notify(job_id, "provider_request_updated")
 
-    def _upsert_artifact(self, session: Session, job_id: int, artifact_type: str, path: Path, content_type: str) -> None:
+    def _upsert_artifact(
+        self,
+        session: Session,
+        job_id: int,
+        artifact_type: str,
+        path: Path,
+        content_type: str,
+    ) -> None:
         artifact = session.exec(
-            select(Artifact).where(Artifact.job_id == job_id, Artifact.artifact_type == artifact_type)
+            select(Artifact).where(
+                Artifact.job_id == job_id, Artifact.artifact_type == artifact_type
+            )
         ).first()
         if artifact:
             artifact.storage_url = str(path)
@@ -679,7 +734,9 @@ class VideoProcessingWorker:
         session.commit()
         job_update_broker.notify(job.id, "job_progress_updated")
 
-    def _mark_job_failed(self, job_id: int, error_code: str, error_message: str) -> None:
+    def _mark_job_failed(
+        self, job_id: int, error_code: str, error_message: str
+    ) -> None:
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
