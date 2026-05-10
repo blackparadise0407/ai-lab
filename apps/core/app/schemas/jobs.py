@@ -35,6 +35,8 @@ class JobResponse(BaseModel):
     status: JobStatus
     current_step: Optional[str] = None
     progress_percent: int
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

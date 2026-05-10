@@ -32,6 +32,7 @@ import {
   getDubProviderVoices,
   getJob,
   getProviderRequests,
+  retryJob,
   uploadVideoCollectionSource,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
@@ -273,6 +274,19 @@ export default function DashboardPage() {
     },
   });
 
+  const retryJobMutation = useMutation({
+    mutationFn: (jobId: number) => retryJob(jobId),
+    onSuccess: async (retriedJob) => {
+      setFormError(null);
+      queryClient.setQueryData(["job", retriedJob.id], retriedJob);
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+      await refreshDashboard(retriedJob.id);
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to retry this job."));
+    },
+  });
+
   const job = jobQuery.data ?? null;
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
@@ -328,6 +342,11 @@ export default function DashboardPage() {
 
     setFormError(null);
     setSelectedJobId(parsedId);
+  }
+
+  function handleRetryJob() {
+    if (!job || job.status !== "failed") return;
+    retryJobMutation.mutate(job.id);
   }
 
   return (
@@ -623,6 +642,19 @@ export default function DashboardPage() {
                   Refresh now
                 </Button>
               )}
+              {job?.status === "failed" && (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={handleRetryJob}
+                  disabled={retryJobMutation.isPending}
+                >
+                  <RefreshCw
+                    className={cn(retryJobMutation.isPending && "animate-spin")}
+                  />
+                  {retryJobMutation.isPending ? "Retrying…" : "Retry failed job"}
+                </Button>
+              )}
               {job?.status === "completed" && (
                 <Link
                   className={buttonVariants({
@@ -696,6 +728,11 @@ export default function DashboardPage() {
                 <Badge variant="secondary">
                   {job.current_step ?? "Waiting for next step"}
                 </Badge>
+                {job.error_message && (
+                  <Badge className="bg-red-100 text-red-700">
+                    Error {job.error_message}
+                  </Badge>
+                )}
               </div>
               <ol className="grid gap-3 lg:grid-cols-6">
                 {statusOrder.map((status, index) => (

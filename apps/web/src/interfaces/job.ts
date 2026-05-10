@@ -27,6 +27,8 @@ export interface Job {
   status: JobStatus;
   current_step?: string | null;
   progress_percent: number;
+  error_code?: string | null;
+  error_message?: string | null;
   created_at: string;
   updated_at: string;
 }

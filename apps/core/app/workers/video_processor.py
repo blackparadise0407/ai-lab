@@ -42,7 +42,7 @@ class PipelineError(RuntimeError):
 
 class VideoProcessingWorker:
     def __init__(self) -> None:
-        self._queue: queue.Queue[int] = queue.Queue()
+        self._queue: queue.Queue[tuple[int, str | None]] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="video-processing-worker", daemon=True
@@ -55,31 +55,33 @@ class VideoProcessingWorker:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._queue.put(-1)
+        self._queue.put((-1, None))
         self._thread.join(timeout=5)
 
-    def enqueue(self, job_id: int) -> None:
-        self._queue.put(job_id)
+    def enqueue(self, job_id: int, retry_from_step: str | None = None) -> None:
+        self._queue.put((job_id, retry_from_step))
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            job_id = self._queue.get()
+            job_id, retry_from_step = self._queue.get()
             if job_id == -1:
                 self._queue.task_done()
                 continue
             try:
-                self._process_job(job_id)
+                self._process_job(job_id, retry_from_step=retry_from_step)
             finally:
                 self._queue.task_done()
 
-    def _process_job(self, job_id: int) -> None:
+    def _process_job(self, job_id: int, retry_from_step: str | None = None) -> None:
         try:
-            self._process_job_impl(job_id)
+            self._process_job_impl(job_id, retry_from_step=retry_from_step)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Video processing failed for job_id=%s", job_id)
             self._mark_job_failed(job_id, "pipeline_error", str(exc))
 
-    def _process_job_impl(self, job_id: int) -> None:
+    def _process_job_impl(
+        self, job_id: int, retry_from_step: str | None = None
+    ) -> None:
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
@@ -103,7 +105,12 @@ class VideoProcessingWorker:
             if not source_video_path.exists():
                 raise PipelineError("Source video file not found")
 
-            self._update_job_progress(session, job, "extracting_audio", 10)
+            srt_artifact_path = self._get_existing_artifact_path(
+                session, job_id, SRT_ARTIFACT_TYPE
+            )
+            tts_audio_artifact_path = self._get_existing_artifact_path(
+                session, job_id, TTS_AUDIO_ARTIFACT_TYPE
+            )
 
         WORK_DIR.mkdir(parents=True, exist_ok=True)
         PROCESSED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,48 +118,85 @@ class VideoProcessingWorker:
         job_work_dir.mkdir(parents=True, exist_ok=True)
 
         source_audio_path = job_work_dir / "source.wav"
-        self._extract_audio(source_video_path, source_audio_path)
-
-        with Session(engine) as session:
-            job = session.exec(select(Job).where(Job.id == job_id)).first()
-            if not job:
-                return
-            self._update_job_progress(session, job, "transcribing", 30)
-
-        srt_source_text = self._transcribe_to_srt(source_audio_path)
         srt_source_path = job_work_dir / "source.srt"
-        srt_source_path.write_text(srt_source_text, encoding="utf-8")
-
-        with Session(engine) as session:
-            job = session.exec(select(Job).where(Job.id == job_id)).first()
-            if not job:
-                return
-            self._update_job_progress(session, job, "translating", 45)
-
-        translated_srt_text = self._translate_srt(
-            srt_source_text, target_language, translation_context
-        )
         translated_srt_path = job_work_dir / "translated.srt"
-        translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
+        tts_audio_path = job_work_dir / "dubbed.wav"
+        reusable_translated_srt_path = srt_artifact_path or translated_srt_path
+        reusable_tts_audio_path = tts_audio_artifact_path or tts_audio_path
 
-        with Session(engine) as session:
-            job = session.exec(select(Job).where(Job.id == job_id)).first()
-            if not job:
-                return
-            self._update_job_progress(
-                session,
-                job,
+        can_reuse_translated_srt = (
+            self._can_retry_after_step(retry_from_step, "synthesizing_chunks")
+            and reusable_translated_srt_path.exists()
+        )
+
+        if can_reuse_translated_srt:
+            translated_srt_path = reusable_translated_srt_path
+            translated_srt_text = translated_srt_path.read_text(encoding="utf-8")
+            logger.info(
+                "Reusing translated SRT for job_id=%s while retrying from step=%s",
+                job_id,
+                retry_from_step,
+            )
+        else:
+            if self._can_retry_after_step(retry_from_step, "transcribing"):
+                if source_audio_path.exists():
+                    logger.info(
+                        "Reusing extracted audio for job_id=%s while retrying from step=%s",
+                        job_id,
+                        retry_from_step,
+                    )
+                else:
+                    self._update_job(job_id, "extracting_audio", 10)
+                    self._extract_audio(source_video_path, source_audio_path)
+            else:
+                self._update_job(job_id, "extracting_audio", 10)
+                self._extract_audio(source_video_path, source_audio_path)
+
+            if (
+                self._can_retry_after_step(retry_from_step, "translating")
+                and srt_source_path.exists()
+            ):
+                srt_source_text = srt_source_path.read_text(encoding="utf-8")
+                logger.info(
+                    "Reusing source SRT for job_id=%s while retrying from step=%s",
+                    job_id,
+                    retry_from_step,
+                )
+            else:
+                self._update_job(job_id, "transcribing", 30)
+                srt_source_text = self._transcribe_to_srt(source_audio_path)
+                srt_source_path.write_text(srt_source_text, encoding="utf-8")
+
+            self._update_job(job_id, "translating", 45)
+            translated_srt_text = self._translate_srt(
+                srt_source_text, target_language, translation_context
+            )
+            translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
+
+        provider_request_ids: list[str] = []
+        if (
+            self._can_retry_after_step(retry_from_step, "muxing")
+            and reusable_tts_audio_path.exists()
+        ):
+            tts_audio_path = reusable_tts_audio_path
+            logger.info(
+                "Reusing synthesized TTS audio for job_id=%s while retrying from step=%s",
+                job_id,
+                retry_from_step,
+            )
+        else:
+            self._update_job(
+                job_id,
                 "synthesizing_chunks",
                 65,
                 status=JobStatus.WAITING_PROVIDER,
             )
-
-        tts_audio_path, provider_request_ids = self._synthesize_dubbed_audio_from_srt(
-            job_id,
-            translated_srt_text,
-            job_work_dir,
-            voice_id,
-        )
+            tts_audio_path, provider_request_ids = self._synthesize_dubbed_audio_from_srt(
+                job_id,
+                translated_srt_text,
+                job_work_dir,
+                voice_id,
+            )
 
         with Session(engine) as session:
             for provider_request_id in provider_request_ids:
@@ -202,6 +246,53 @@ class VideoProcessingWorker:
             session.add(job)
             session.commit()
             job_update_broker.notify(job.id, "job_completed")
+
+    def _can_retry_after_step(self, retry_from_step: str | None, step: str) -> bool:
+        if retry_from_step is None:
+            return False
+
+        step_order = {
+            "extracting_audio": 0,
+            "transcribing": 1,
+            "translating": 2,
+            "synthesizing_chunks": 3,
+            "muxing": 4,
+        }
+        retry_step_index = step_order.get(retry_from_step)
+        step_index = step_order.get(step)
+        return (
+            retry_step_index is not None
+            and step_index is not None
+            and retry_step_index >= step_index
+        )
+
+    def _get_existing_artifact_path(
+        self, session: Session, job_id: int, artifact_type: str
+    ) -> Path | None:
+        artifact = session.exec(
+            select(Artifact).where(
+                Artifact.job_id == job_id, Artifact.artifact_type == artifact_type
+            )
+        ).first()
+        if not artifact:
+            return None
+
+        path = Path(artifact.storage_url)
+        return path if path.exists() else None
+
+    def _update_job(
+        self,
+        job_id: int,
+        step: str,
+        progress: int,
+        *,
+        status: JobStatus = JobStatus.PROCESSING,
+    ) -> None:
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            self._update_job_progress(session, job, step, progress, status=status)
 
     def _extract_audio(self, source_video: Path, output_audio: Path) -> None:
         cmd = [
@@ -760,7 +851,6 @@ class VideoProcessingWorker:
             if not job:
                 return
             job.status = JobStatus.FAILED
-            job.current_step = "failed"
             job.error_code = error_code
             job.error_message = error_message[:1024]
             job.updated_at = datetime.now(timezone.utc)
