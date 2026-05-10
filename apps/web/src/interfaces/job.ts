@@ -20,6 +20,7 @@ export interface Job {
   external_job_id: string;
   source_language: string;
   target_language: string;
+  translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
   original_audio_volume: number;
@@ -122,6 +123,7 @@ export interface VideoCollection {
   original_filename?: string | null;
   source_language: string;
   target_language: string;
+  translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
   original_audio_volume: number;
@@ -151,6 +153,7 @@ export interface VideoCollectionCreateRequest {
   title?: string | null;
   source_language: string;
   target_language: string;
+  translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed?: number;
   original_audio_volume?: number;

@@ -85,6 +85,7 @@ class VideoProcessingWorker:
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
                 return
             target_language = job.target_language
+            translation_context = job.translation_context
             voice_id = job.voice_id
             output_video_speed = job.output_video_speed
             original_audio_volume = job.original_audio_volume
@@ -128,7 +129,9 @@ class VideoProcessingWorker:
                 return
             self._update_job_progress(session, job, "translating", 45)
 
-        translated_srt_text = self._translate_srt(srt_source_text, target_language)
+        translated_srt_text = self._translate_srt(
+            srt_source_text, target_language, translation_context
+        )
         translated_srt_path = job_work_dir / "translated.srt"
         translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
 
@@ -235,7 +238,12 @@ class VideoProcessingWorker:
             raise PipelineError("Whisper returned no transcription segments")
         return "\n\n".join(srt_blocks) + "\n"
 
-    def _translate_srt(self, srt_text: str, target_language: str) -> str:
+    def _translate_srt(
+        self,
+        srt_text: str,
+        target_language: str,
+        translation_context: str | None = None,
+    ) -> str:
         openai_api_key = os.getenv("OPENAI_API_KEY")
         if not openai_api_key:
             return srt_text
@@ -250,6 +258,7 @@ class VideoProcessingWorker:
             openai_api_key=openai_api_key,
             model=model,
             target_language=target_language,
+            translation_context=translation_context,
             cues=self._build_translation_cues(blocks),
         )
 
@@ -299,8 +308,35 @@ class VideoProcessingWorker:
         openai_api_key: str,
         model: str,
         target_language: str,
+        translation_context: str | None = None,
         cues: list[dict[str, object]],
     ) -> list[str]:
+        context_instruction = ""
+        if translation_context:
+            context_instruction = (
+                "\n### User Context\n"
+                f"Use this additional context when choosing wording, tone, and names: {translation_context}\n"
+            )
+
+        system_text = (
+            "You are an expert subtitle translator and dubbing script editor. "
+            f"Your goal is to translate SRT cues into {target_language} while ensuring the spoken duration of the translation perfectly matches the original audio timing.\n\n"
+            "### Task Instructions\n"
+            "Translate the `text` field of each provided SRT object. Use the `duration_seconds` field as a hard constraint for the length of the translation."
+            f"{context_instruction}\n"
+            "### Rules you MUST follow (in priority order):\n"
+            '1. **Output Format:** Return ONLY a JSON array of strings (e.g., ["translation 1", "translation 2"]). No markdown, no prose, and no extra JSON keys.\n'
+            "2. **1:1 Mapping:** The output array must contain exactly the same number of elements as the input array. Do not merge, skip, or split cues.\n"
+            '3. **The "Dubbing" Constraint (Isynchrony):**\n'
+            "   - Each translation must be speakable at a natural pace within its `duration_seconds`.\n"
+            "   - **Priority:** Brevity and timing > Literal word-for-word accuracy.\n"
+            "   - Use shorter synonyms, contractions, or natural ellipses to ensure the line fits the time window without rushing the voice actor.\n"
+            "4. **Sentence Continuity:** If a sentence spans across multiple cues, ensure the grammar remains coherent across the breaks while respecting the individual timing of each fragment.\n"
+            "5. **Non-Speech Elements:** Preserve all tags in brackets (e.g., `[music]`, `[laughter]`) or speaker identifiers (e.g., `MAN:`) exactly as they appear.\n"
+            f"6. **Naturalness:** Write fluent, idiomatic {target_language} with a natural spoken tone. Use nearby cues as context for formality and gender consistency.\n"
+            f"7. **Fallback:** If a cue is already in {target_language} or contains no translatable text, copy the original string verbatim."
+        )
+
         payload = {
             "model": model,
             "input": [
@@ -309,25 +345,7 @@ class VideoProcessingWorker:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": (
-                                "You are a professional subtitle translator and dubbing editor. "
-                                f"Translate the `text` field of every SRT cue object into {target_language}. "
-                                "Each cue includes `timing` and `duration_seconds`; use them to make the translation fit the subtitle window. "
-                                "Rules you MUST follow, in priority order:\n"
-                                "1. Return ONLY a JSON array of strings — no markdown, no extra keys, no prose.\n"
-                                "2. The output array MUST contain exactly the same number of elements as the input array.\n"
-                                "3. Element at index N in the output is the translation for cue index N — never merge, split, reorder, or omit cues.\n"
-                                "4. SRT MATCH (highest priority): Keep each translation aligned with its original cue boundary, timing, and spoken rhythm. "
-                                "Do not move meaning from one cue to another, and keep roughly the same information density as the source cue whenever possible.\n"
-                                "5. TIMESTAMP FIT: Each translation must be short enough to be spoken naturally inside that cue's `duration_seconds` SRT timestamp window. "
-                                "For very short cues, use concise phrasing; for longer cues, keep the full thought but avoid unnecessary padding. "
-                                "Prefer shorter synonyms, pronouns, or natural ellipsis over literal wording when needed to fit.\n"
-                                f"6. NATURALNESS AND COHERENCE: Within the SRT-match and timestamp-fit constraints, write fluent, idiomatic {target_language} with a natural spoken tone. "
-                                "Use nearby cues as context so pronouns, formality, and transitions remain coherent, but keep each cue self-contained.\n"
-                                "7. Preserve the original meaning, intent, and emotional tone as closely as possible given constraints 4-6.\n"
-                                "8. Do not add explanations, speaker labels, parentheticals, or content that was not implied by the source.\n"
-                                "9. If a cue cannot be translated (e.g. it is already in the target language), copy its text verbatim."
-                            ),
+                            "text": system_text,
                         }
                     ],
                 },

@@ -45,9 +45,7 @@ def test_build_translation_cues_includes_srt_timing_and_duration() -> None:
     ]
 
 
-def test_openai_translation_prompt_prioritizes_srt_match_timestamp_fit_and_natural_coherence() -> (
-    None
-):
+def test_openai_translation_prompt_prioritizes_dubbing_timing_and_context() -> None:
     worker = VideoProcessingWorker()
     captured_payload: dict = {}
 
@@ -77,6 +75,7 @@ def test_openai_translation_prompt_prioritizes_srt_match_timestamp_fit_and_natur
             openai_api_key="test-key",
             model="test-model",
             target_language="Vietnamese",
+            translation_context="wuxia comedy",
             cues=cues,
         )
 
@@ -84,10 +83,12 @@ def test_openai_translation_prompt_prioritizes_srt_match_timestamp_fit_and_natur
     user_cues = json.loads(captured_payload["input"][1]["content"][0]["text"])
 
     assert translated == ["Xin chào", "Đi thôi"]
-    assert "SRT MATCH (highest priority)" in system_text
-    assert "original cue boundary, timing, and spoken rhythm" in system_text
-    assert "TIMESTAMP FIT" in system_text
-    assert "duration_seconds" in system_text
-    assert "NATURALNESS AND COHERENCE" in system_text
+    assert "expert subtitle translator and dubbing script editor" in system_text
+    assert "duration_seconds` field as a hard constraint" in system_text
+    assert 'The "Dubbing" Constraint (Isynchrony)' in system_text
+    assert "Brevity and timing > Literal word-for-word accuracy" in system_text
+    assert "Sentence Continuity" in system_text
+    assert "Non-Speech Elements" in system_text
+    assert "wuxia comedy" in system_text
     assert "Vietnamese" in system_text
     assert user_cues == cues

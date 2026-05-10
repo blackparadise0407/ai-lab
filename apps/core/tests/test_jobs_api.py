@@ -43,7 +43,9 @@ def test_list_jobs_supports_status_filter_and_pagination() -> None:
     app.dependency_overrides[get_session] = override_get_session
     try:
         client = TestClient(app)
-        response = client.get("/v1/jobs", params={"status": "completed", "limit": 2, "offset": 1})
+        response = client.get(
+            "/v1/jobs", params={"status": "completed", "limit": 2, "offset": 1}
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -58,7 +60,7 @@ def test_list_jobs_supports_status_filter_and_pagination() -> None:
     ]
 
 
-def test_create_job_accepts_voice_id_and_output_video_config() -> None:
+def test_create_job_accepts_translation_context() -> None:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -78,6 +80,7 @@ def test_create_job_accepts_voice_id_and_output_video_config() -> None:
             json={
                 "source_language": "zh",
                 "target_language": "vi",
+                "translation_context": "martial arts comedy",
                 "voice_id": "voice-one",
                 "output_video_speed": 1.25,
                 "original_audio_volume": 0.2,
@@ -87,6 +90,36 @@ def test_create_job_accepts_voice_id_and_output_video_config() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 201
+    assert response.json()["translation_context"] == "martial arts comedy"
     assert response.json()["voice_id"] == "voice-one"
     assert response.json()["output_video_speed"] == 1.25
     assert response.json()["original_audio_volume"] == 0.2
+
+
+def test_create_job_rejects_translation_context_over_100_characters() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/v1/jobs",
+            json={
+                "source_language": "zh",
+                "target_language": "vi",
+                "translation_context": "x" * 101,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422

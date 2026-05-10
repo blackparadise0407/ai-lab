@@ -39,6 +39,7 @@ export async function createJob(
   voiceId?: string | null,
   outputVideoSpeed = 1,
   originalAudioVolume = 0.15,
+  translationContext?: string | null,
 ) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs`, {
     method: 'POST',
@@ -46,6 +47,7 @@ export async function createJob(
     body: JSON.stringify({
       source_language: sourceLanguage,
       target_language: targetLanguage,
+      translation_context: translationContext || null,
       voice_id: voiceId || null,
       output_video_speed: outputVideoSpeed,
       original_audio_volume: originalAudioVolume,
