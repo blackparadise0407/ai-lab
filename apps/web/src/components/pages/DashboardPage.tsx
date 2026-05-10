@@ -8,6 +8,7 @@ import {
   Plug,
   PlugZap,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -26,6 +27,7 @@ import type {
 import {
   apiBaseUrl,
   createVideoCollection,
+  deleteJob,
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
@@ -287,6 +289,24 @@ export default function DashboardPage() {
     },
   });
 
+  const deleteJobMutation = useMutation({
+    mutationFn: (jobId: number) => deleteJob(jobId),
+    onSuccess: async (_, deletedJobId) => {
+      setFormError(null);
+      setSelectedJobId(null);
+      setJobIdInput("");
+      queryClient.removeQueries({ queryKey: ["job", deletedJobId] });
+      queryClient.removeQueries({ queryKey: ["artifacts", deletedJobId] });
+      queryClient.removeQueries({
+        queryKey: ["provider-requests", deletedJobId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to delete this job."));
+    },
+  });
+
   const job = jobQuery.data ?? null;
   const artifacts = artifactsQuery.data ?? [];
   const providerRequests = providerRequestsQuery.data ?? [];
@@ -347,6 +367,13 @@ export default function DashboardPage() {
   function handleRetryJob() {
     if (!job || job.status !== "failed") return;
     retryJobMutation.mutate(job.id);
+  }
+
+  function handleDeleteJob() {
+    if (!job) return;
+    if (window.confirm("Delete this job and its local artifact files?")) {
+      deleteJobMutation.mutate(job.id);
+    }
   }
 
   return (
@@ -665,6 +692,21 @@ export default function DashboardPage() {
                 >
                   Publish this job
                 </Link>
+              )}
+              {job && (
+                <Button
+                  variant="destructive"
+                  type="button"
+                  onClick={handleDeleteJob}
+                  disabled={deleteJobMutation.isPending}
+                >
+                  {deleteJobMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Trash2 />
+                  )}
+                  {deleteJobMutation.isPending ? "Deleting…" : "Delete job"}
+                </Button>
               )}
             </form>
           </CardContent>

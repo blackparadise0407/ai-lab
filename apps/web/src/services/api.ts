@@ -74,6 +74,16 @@ export async function getJob(jobId: number) {
   return parseJsonResponse<Job>(response);
 }
 
+export async function deleteJob(jobId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const message = await getResponseErrorMessage(response);
+    throw new Error(message || `${response.status} ${response.statusText}`);
+  }
+}
+
 export async function retryJob(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}/retry`, {
     method: 'POST',
@@ -132,6 +142,16 @@ export async function getVideoCollections(
 export async function getVideoCollection(collectionId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}`);
   return parseJsonResponse<VideoCollectionDetail>(response);
+}
+
+export async function deleteVideoCollection(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const message = await getResponseErrorMessage(response);
+    throw new Error(message || `${response.status} ${response.statusText}`);
+  }
 }
 
 export async function getVideoCollectionSegments(collectionId: number) {

@@ -21,6 +21,7 @@ from app.schemas.video_collections import (
     VideoSegmentArtifactResponse,
     VideoSegmentResponse,
 )
+from app.services.deletion import delete_collection_and_artifacts
 from app.services.video_collections import refresh_collection_rollup
 from app.services.video_splitter import VideoSplitError, split_video
 from app.workers.video_processor import (
@@ -215,6 +216,20 @@ async def upload_collection_video(
         video_processing_worker.enqueue(job_id=job_id)
 
     return _collection_detail_response(session, collection)
+
+
+@router.delete(
+    "/{collection_id}",
+    status_code=204,
+    summary="Delete video collection",
+    description="Deletes a video collection, all segment jobs, database artifact records, and local artifact files.",
+)
+def delete_video_collection(
+    collection_id: int, session: Session = Depends(get_session)
+):
+    collection = _get_collection_or_404(session, collection_id)
+    delete_collection_and_artifacts(session, collection)
+    return None
 
 
 @router.get(

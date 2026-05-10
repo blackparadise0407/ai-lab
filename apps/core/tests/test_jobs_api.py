@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
 from app.db.database import get_session
@@ -226,3 +226,66 @@ def test_retry_rejects_non_failed_job(monkeypatch) -> None:
     assert response.status_code == 409
     assert response.json()["detail"] == "Only failed jobs can be retried"
     assert enqueued_job_ids == []
+
+
+def test_delete_job_removes_artifacts_provider_requests_and_local_files(tmp_path) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    artifact_file = tmp_path / "job-output.mp4"
+    artifact_file.write_bytes(b"video")
+
+    with Session(engine) as session:
+        job = Job(external_job_id="delete_me")
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        job_id = job.id
+
+        session.add(
+            Artifact(
+                job_id=job_id,
+                artifact_type="processed_video",
+                storage_url=str(artifact_file),
+                content_type="video/mp4",
+            )
+        )
+        from app.models.entities import ProviderRequest
+
+        session.add(
+            ProviderRequest(
+                job_id=job_id,
+                provider_name="upload_youtube",
+                provider_request_id="upload_delete_me",
+            )
+        )
+        session.commit()
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.delete(f"/v1/jobs/{job_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert not artifact_file.exists()
+    with Session(engine) as session:
+        from app.models.entities import ProviderRequest
+
+        assert session.get(Job, job_id) is None
+        assert session.exec(select(Artifact).where(Artifact.job_id == job_id)).all() == []
+        assert (
+            session.exec(
+                select(ProviderRequest).where(ProviderRequest.job_id == job_id)
+            ).all()
+            == []
+        )

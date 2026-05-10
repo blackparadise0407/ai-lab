@@ -8,6 +8,8 @@ import {
 
 import type { ProviderRequest, UploadPlatform, VideoSegment } from "../../interfaces/job";
 import {
+  deleteJob,
+  deleteVideoCollection,
   getConnectedAccounts,
   getProviderRequests,
   getVideoCollectionSegments,
@@ -119,6 +121,30 @@ export default function VideosPage() {
     },
   });
 
+  const deleteCollectionMutation = useMutation({
+    mutationFn: deleteVideoCollection,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+    },
+  });
+
+  const deleteJobMutation = useMutation({
+    mutationFn: async ({ jobId }: { collectionId: number; jobId: number }) => {
+      await deleteJob(jobId);
+    },
+    onSuccess: async (_, variables) => {
+      queryClient.removeQueries({
+        queryKey: ["provider-requests", variables.jobId],
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["video-collections"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["video-collection-segments", variables.collectionId],
+        }),
+      ]);
+    },
+  });
+
   const isVideosLoading =
     collectionsQuery.isLoading ||
     segmentQueries.some((query) => query.isLoading) ||
@@ -134,6 +160,12 @@ export default function VideosPage() {
       collections={collections}
       error={videosError}
       isLoading={isVideosLoading}
+      onDeleteCollection={(collectionId) =>
+        deleteCollectionMutation.mutate(collectionId)
+      }
+      onDeleteJob={(collectionId, jobId) =>
+        deleteJobMutation.mutate({ collectionId, jobId })
+      }
       onPageChange={setCollectionsPage}
       onPublish={(jobId, platform) =>
         publishMutation.mutate({ jobIds: [jobId], platform })
@@ -142,6 +174,16 @@ export default function VideosPage() {
         publishMutation.mutate({ jobIds, platform })
       }
       page={collectionsPage}
+      pendingDeleteCollectionId={
+        deleteCollectionMutation.isPending
+          ? (deleteCollectionMutation.variables ?? null)
+          : null
+      }
+      pendingDeleteJobId={
+        deleteJobMutation.isPending
+          ? (deleteJobMutation.variables?.jobId ?? null)
+          : null
+      }
       pageSize={VIDEO_COLLECTIONS_PAGE_SIZE}
       pendingPublish={
         publishMutation.isPending
@@ -150,6 +192,7 @@ export default function VideosPage() {
       }
       providerRequestsByJobId={providerRequestsByJobId}
       publishError={publishMutation.error}
+      deleteError={deleteCollectionMutation.error ?? deleteJobMutation.error}
       segmentsByCollectionId={segmentsByCollectionId}
       total={collectionsTotal}
       totalPages={collectionsTotalPages}
