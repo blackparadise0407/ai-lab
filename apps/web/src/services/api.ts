@@ -239,5 +239,5 @@ export function getArtifactPreviewUrl(artifact: Artifact) {
     return artifact.storage_url;
   }
 
-  return `${getArtifactDownloadUrl(artifact)}?disposition=inline`;
+  return `${apiBaseUrl}/v1/artifacts/${artifact.id}/preview`;
 }
