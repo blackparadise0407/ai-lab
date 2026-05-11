@@ -91,7 +91,7 @@ def test_synthesize_dubbed_audio_from_srt_submits_one_compiled_ssml_request(
     assert provider_request_ids == ["provider-request-1"]
 
 
-def test_synthesize_dubbed_audio_from_script_compiles_chunks_with_breaks(
+def test_synthesize_dubbed_audio_from_script_compiles_chunks(
     tmp_path,
 ) -> None:
     worker = VideoProcessingWorker()
@@ -114,14 +114,12 @@ def test_synthesize_dubbed_audio_from_script_compiles_chunks_with_breaks(
                     "text": "Xin chào & tạm biệt",
                     "source_start": 1.0,
                     "source_end": 2.0,
-                    "pause_after_seconds": 0.55,
                 },
                 {
                     "index": 1,
                     "text": "đi thôi",
                     "source_start": 2.55,
                     "source_end": 3.5,
-                    "pause_after_seconds": 0,
                 },
             ],
         },
@@ -132,11 +130,9 @@ def test_synthesize_dubbed_audio_from_script_compiles_chunks_with_breaks(
     chunk_requests = captured["chunk_requests"]
     assert captured["job_id"] == 43
     assert len(chunk_requests) == 1
-    assert (
-        chunk_requests[0].text == "Xin chào &amp; tạm biệt <break time=0.55s/> đi thôi"
-    )
+    assert chunk_requests[0].text == "Xin chào &amp; tạm biệt đi thôi"
     assert chunk_requests[0].output_audio == tmp_path / "dubbed.wav"
-    assert chunk_requests[0].duration_seconds == 3.6
+    assert chunk_requests[0].duration_seconds == 3.5
     assert chunk_requests[0].voice_id == "voice-2"
     assert output_audio == tmp_path / "dubbed.wav"
     assert provider_request_ids == ["provider-request-2"]
