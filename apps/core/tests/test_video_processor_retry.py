@@ -6,15 +6,21 @@ from sqlmodel.pool import StaticPool
 from app.models.entities import Artifact, Job, JobStatus
 from app.workers import video_processor
 from app.workers.video_processor import (
+    ASS_ARTIFACT_TYPE,
+    DUBBED_TRANSCRIPT_ARTIFACT_TYPE,
     PROCESSED_ARTIFACT_TYPE,
     SRT_ARTIFACT_TYPE,
+    SOURCE_TRANSCRIPT_ARTIFACT_TYPE,
     SOURCE_VIDEO_ARTIFACT_TYPE,
+    TARGET_SCRIPT_ARTIFACT_TYPE,
     TTS_AUDIO_ARTIFACT_TYPE,
     VideoProcessingWorker,
 )
 
 
-def test_retry_from_muxing_reuses_existing_intermediate_files(tmp_path, monkeypatch) -> None:
+def test_retry_from_muxing_reuses_existing_intermediate_files(
+    tmp_path, monkeypatch
+) -> None:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -33,13 +39,25 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(tmp_path, monkeypa
         "1\n00:00:00,000 --> 00:00:01,000\nHello\n",
         encoding="utf-8",
     )
-    translated_srt = job_work_dir / "translated.srt"
-    translated_srt.write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nXin chào\n",
+    source_transcript = job_work_dir / "source_transcript.json"
+    source_transcript.write_text(
+        '{"language":"en","segments":[{"start":0,"end":1,"text":"Hello"}]}',
+        encoding="utf-8",
+    )
+    target_script = job_work_dir / "target_script.json"
+    target_script.write_text(
+        '{"target_language":"vi","script":"Xin chào","chunks":[{"index":0,"text":"Xin chào","source_start":0,"source_end":1,"pause_after_seconds":0}],"glossary":[]}',
         encoding="utf-8",
     )
     dubbed_audio = job_work_dir / "dubbed.wav"
     dubbed_audio.write_bytes(b"dubbed")
+    dubbed_transcript = job_work_dir / "dubbed_transcript.json"
+    dubbed_transcript.write_text(
+        '{"language":"vi","segments":[{"start":0,"end":1,"text":"Xin chào"}]}',
+        encoding="utf-8",
+    )
+    ass_subtitle = job_work_dir / "karaoke.ass"
+    ass_subtitle.write_text("[Script Info]\n", encoding="utf-8")
 
     with Session(engine) as session:
         job = Job(
@@ -76,23 +94,30 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         worker,
-        "_transcribe_to_srt",
+        "_transcribe_audio",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("source SRT should be reused")
+            AssertionError("transcripts should be reused")
         ),
     )
     monkeypatch.setattr(
         worker,
-        "_translate_srt",
+        "_build_target_dubbing_script",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("translated SRT should be reused")
+            AssertionError("target script should be reused")
         ),
     )
     monkeypatch.setattr(
         worker,
-        "_synthesize_dubbed_audio_from_srt",
+        "_synthesize_dubbed_audio_from_script",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("dubbed audio should be reused")
+        ),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_generate_karaoke_ass",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ASS subtitles should be reused")
         ),
     )
 
@@ -112,7 +137,7 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(tmp_path, monkeypa
     assert mux_inputs == {
         "source": source_video,
         "dubbed": dubbed_audio,
-        "subtitles": translated_srt,
+        "subtitles": ass_subtitle,
     }
     with Session(engine) as session:
         job = session.get(Job, job_id)
@@ -128,5 +153,13 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(tmp_path, monkeypa
     assert artifacts[PROCESSED_ARTIFACT_TYPE].storage_url == str(
         processed_dir / f"job_{job_id}_dubbed.mp4"
     )
-    assert artifacts[SRT_ARTIFACT_TYPE].storage_url == str(translated_srt)
+    assert artifacts[SOURCE_TRANSCRIPT_ARTIFACT_TYPE].storage_url == str(
+        source_transcript
+    )
+    assert artifacts[TARGET_SCRIPT_ARTIFACT_TYPE].storage_url == str(target_script)
+    assert artifacts[DUBBED_TRANSCRIPT_ARTIFACT_TYPE].storage_url == str(
+        dubbed_transcript
+    )
+    assert artifacts[ASS_ARTIFACT_TYPE].storage_url == str(ass_subtitle)
+    assert artifacts[SRT_ARTIFACT_TYPE].storage_url == str(job_work_dir / "source.srt")
     assert artifacts[TTS_AUDIO_ARTIFACT_TYPE].storage_url == str(dubbed_audio)

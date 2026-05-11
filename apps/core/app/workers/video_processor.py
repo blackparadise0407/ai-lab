@@ -29,8 +29,12 @@ from app.providers.dub_provider import DubProviderClient, TtsChunkRequest
 
 PROCESSED_ARTIFACT_TYPE = "dubbed_video"
 SRT_ARTIFACT_TYPE = "subtitle_srt"
+ASS_ARTIFACT_TYPE = "subtitle_ass"
 TTS_AUDIO_ARTIFACT_TYPE = "tts_audio"
 SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
+SOURCE_TRANSCRIPT_ARTIFACT_TYPE = "source_transcript"
+TARGET_SCRIPT_ARTIFACT_TYPE = "target_script"
+DUBBED_TRANSCRIPT_ARTIFACT_TYPE = "dubbed_transcript"
 
 WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
@@ -106,9 +110,6 @@ class VideoProcessingWorker:
             if not source_video_path.exists():
                 raise PipelineError("Source video file not found")
 
-            srt_artifact_path = self._get_existing_artifact_path(
-                session, job_id, SRT_ARTIFACT_TYPE
-            )
             tts_audio_artifact_path = self._get_existing_artifact_path(
                 session, job_id, TTS_AUDIO_ARTIFACT_TYPE
             )
@@ -120,63 +121,72 @@ class VideoProcessingWorker:
 
         source_audio_path = job_work_dir / "source.wav"
         srt_source_path = job_work_dir / "source.srt"
-        translated_srt_path = job_work_dir / "translated.srt"
+        source_transcript_path = job_work_dir / "source_transcript.json"
+        target_script_path = job_work_dir / "target_script.json"
+        dubbed_transcript_path = job_work_dir / "dubbed_transcript.json"
+        ass_subtitle_path = job_work_dir / "karaoke.ass"
         tts_audio_path = job_work_dir / "dubbed.wav"
-        reusable_translated_srt_path = srt_artifact_path or translated_srt_path
         reusable_tts_audio_path = tts_audio_artifact_path or tts_audio_path
 
-        can_reuse_translated_srt = (
-            self._can_retry_after_step(retry_from_step, "synthesizing_chunks")
-            and reusable_translated_srt_path.exists()
-        )
-
-        if can_reuse_translated_srt:
-            translated_srt_path = reusable_translated_srt_path
-            translated_srt_text = translated_srt_path.read_text(encoding="utf-8")
+        if (
+            self._can_retry_after_step(retry_from_step, "transcribing_source")
+            and source_audio_path.exists()
+        ):
             logger.info(
-                "Reusing translated SRT for job_id=%s while retrying from step=%s",
+                "Reusing extracted audio for job_id=%s while retrying from step=%s",
                 job_id,
                 retry_from_step,
             )
         else:
-            if self._can_retry_after_step(retry_from_step, "transcribing"):
-                if source_audio_path.exists():
-                    logger.info(
-                        "Reusing extracted audio for job_id=%s while retrying from step=%s",
-                        job_id,
-                        retry_from_step,
-                    )
-                else:
-                    self._update_job(job_id, "extracting_audio", 10)
-                    self._extract_audio(source_video_path, source_audio_path)
-            else:
-                self._update_job(job_id, "extracting_audio", 10)
-                self._extract_audio(source_video_path, source_audio_path)
+            self._update_job(job_id, "extracting_audio", 10)
+            self._extract_audio(source_video_path, source_audio_path)
 
-            if (
-                self._can_retry_after_step(retry_from_step, "translating")
-                and srt_source_path.exists()
-            ):
-                srt_source_text = srt_source_path.read_text(encoding="utf-8")
-                logger.info(
-                    "Reusing source SRT for job_id=%s while retrying from step=%s",
-                    job_id,
-                    retry_from_step,
-                )
-            else:
-                self._update_job(job_id, "transcribing", 30)
-                srt_source_text = self._transcribe_to_srt(source_audio_path)
-                srt_source_path.write_text(srt_source_text, encoding="utf-8")
-
-            self._update_job(job_id, "translating", 45)
-            translated_srt_text = self._translate_srt(
-                srt_source_text, target_language, translation_context
+        if (
+            self._can_retry_after_step(retry_from_step, "building_target_script")
+            and source_transcript_path.exists()
+        ):
+            source_transcript = self._read_json_file(source_transcript_path)
+            logger.info(
+                "Reusing source transcript for job_id=%s while retrying from step=%s",
+                job_id,
+                retry_from_step,
             )
-            translated_srt_path.write_text(translated_srt_text, encoding="utf-8")
+        else:
+            self._update_job(job_id, "transcribing_source", 25)
+            source_transcript = self._transcribe_audio(
+                source_audio_path, language=job.source_language, word_timestamps=False
+            )
+            source_transcript_path.write_text(
+                json.dumps(source_transcript, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            srt_source_path.write_text(
+                self._transcript_to_srt(source_transcript), encoding="utf-8"
+            )
+
+        if (
+            self._can_retry_after_step(retry_from_step, "synthesizing_dub")
+            and target_script_path.exists()
+        ):
+            target_script = self._read_json_file(target_script_path)
+            logger.info(
+                "Reusing target script for job_id=%s while retrying from step=%s",
+                job_id,
+                retry_from_step,
+            )
+        else:
+            self._update_job(job_id, "building_target_script", 45)
+            target_script = self._build_target_dubbing_script(
+                source_transcript, target_language, translation_context
+            )
+            target_script_path.write_text(
+                json.dumps(target_script, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         provider_request_ids: list[str] = []
         if (
-            self._can_retry_after_step(retry_from_step, "muxing")
+            self._can_retry_after_step(retry_from_step, "transcribing_dub")
             and reusable_tts_audio_path.exists()
         ):
             tts_audio_path = reusable_tts_audio_path
@@ -188,15 +198,52 @@ class VideoProcessingWorker:
         else:
             self._update_job(
                 job_id,
-                "synthesizing_chunks",
-                65,
+                "synthesizing_dub",
+                60,
                 status=JobStatus.WAITING_PROVIDER,
             )
-            tts_audio_path, provider_request_ids = self._synthesize_dubbed_audio_from_srt(
+            tts_audio_path, provider_request_ids = (
+                self._synthesize_dubbed_audio_from_script(
+                    job_id,
+                    target_script,
+                    job_work_dir,
+                    voice_id,
+                )
+            )
+
+        if (
+            self._can_retry_after_step(retry_from_step, "generating_ass")
+            and dubbed_transcript_path.exists()
+        ):
+            dubbed_transcript = self._read_json_file(dubbed_transcript_path)
+            logger.info(
+                "Reusing dubbed transcript for job_id=%s while retrying from step=%s",
                 job_id,
-                translated_srt_text,
-                job_work_dir,
-                voice_id,
+                retry_from_step,
+            )
+        else:
+            self._update_job(job_id, "transcribing_dub", 75)
+            dubbed_transcript = self._transcribe_audio(
+                tts_audio_path, language=target_language, word_timestamps=True
+            )
+            dubbed_transcript_path.write_text(
+                json.dumps(dubbed_transcript, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        if (
+            self._can_retry_after_step(retry_from_step, "muxing")
+            and ass_subtitle_path.exists()
+        ):
+            logger.info(
+                "Reusing ASS subtitles for job_id=%s while retrying from step=%s",
+                job_id,
+                retry_from_step,
+            )
+        else:
+            self._update_job(job_id, "generating_ass", 82)
+            ass_subtitle_path.write_text(
+                self._generate_karaoke_ass(dubbed_transcript), encoding="utf-8"
             )
 
         with Session(engine) as session:
@@ -206,14 +253,14 @@ class VideoProcessingWorker:
             if not job:
                 return
             self._update_job_progress(
-                session, job, "muxing", 85, status=JobStatus.FINALIZING
+                session, job, "muxing", 90, status=JobStatus.FINALIZING
             )
 
         output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
         self._mux_audio(
             source_video_path,
             tts_audio_path,
-            translated_srt_path,
+            ass_subtitle_path,
             output_path,
             output_video_speed=output_video_speed,
             original_audio_volume=original_audio_volume,
@@ -230,8 +277,32 @@ class VideoProcessingWorker:
             self._upsert_artifact(
                 session,
                 job_id,
+                SOURCE_TRANSCRIPT_ARTIFACT_TYPE,
+                source_transcript_path,
+                "application/json",
+            )
+            self._upsert_artifact(
+                session,
+                job_id,
+                TARGET_SCRIPT_ARTIFACT_TYPE,
+                target_script_path,
+                "application/json",
+            )
+            self._upsert_artifact(
+                session,
+                job_id,
+                DUBBED_TRANSCRIPT_ARTIFACT_TYPE,
+                dubbed_transcript_path,
+                "application/json",
+            )
+            self._upsert_artifact(
+                session, job_id, ASS_ARTIFACT_TYPE, ass_subtitle_path, "text/x-ass"
+            )
+            self._upsert_artifact(
+                session,
+                job_id,
                 SRT_ARTIFACT_TYPE,
-                translated_srt_path,
+                srt_source_path,
                 "application/x-subrip",
             )
             self._upsert_artifact(
@@ -255,9 +326,14 @@ class VideoProcessingWorker:
         step_order = {
             "extracting_audio": 0,
             "transcribing": 1,
+            "transcribing_source": 1,
             "translating": 2,
+            "building_target_script": 2,
             "synthesizing_chunks": 3,
-            "muxing": 4,
+            "synthesizing_dub": 3,
+            "transcribing_dub": 4,
+            "generating_ass": 5,
+            "muxing": 6,
         }
         retry_step_index = step_order.get(retry_from_step)
         step_index = step_order.get(step)
@@ -311,6 +387,276 @@ class VideoProcessingWorker:
             str(output_audio),
         ]
         self._run_cmd(cmd, "audio extraction failed")
+
+    def _read_json_file(self, path: Path) -> dict[str, object]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise PipelineError(f"Invalid JSON artifact: {path}") from exc
+        if not isinstance(value, dict):
+            raise PipelineError(f"JSON artifact must be an object: {path}")
+        return value
+
+    def _transcribe_audio(
+        self,
+        source_audio: Path,
+        *,
+        language: str | None = None,
+        word_timestamps: bool = False,
+    ) -> dict[str, object]:
+        model_name = os.getenv("WHISPER_MODEL", "small")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+        model = WhisperModel(model_name, compute_type=compute_type)
+        transcribe_kwargs: dict[str, object] = {
+            "vad_filter": True,
+            "word_timestamps": word_timestamps,
+        }
+        normalized_language = (language or "").strip()
+        if normalized_language:
+            transcribe_kwargs["language"] = normalized_language
+
+        segments, info = model.transcribe(str(source_audio), **transcribe_kwargs)
+        transcript_segments: list[dict[str, object]] = []
+        for idx, segment in enumerate(segments):
+            text = segment.text.strip()
+            if not text:
+                continue
+            transcript_segment: dict[str, object] = {
+                "index": idx,
+                "start": round(float(segment.start), 3),
+                "end": round(float(segment.end), 3),
+                "text": text,
+            }
+            words = []
+            for word in getattr(segment, "words", None) or []:
+                word_text = getattr(word, "word", "").strip()
+                if not word_text:
+                    continue
+                words.append(
+                    {
+                        "start": round(float(getattr(word, "start", segment.start)), 3),
+                        "end": round(float(getattr(word, "end", segment.end)), 3),
+                        "text": word_text,
+                    }
+                )
+            if words:
+                transcript_segment["words"] = words
+            transcript_segments.append(transcript_segment)
+
+        if not transcript_segments:
+            raise PipelineError("Whisper returned no transcription segments")
+
+        detected_language = (
+            getattr(info, "language", None) or normalized_language or None
+        )
+        return {
+            "language": detected_language,
+            "duration": getattr(info, "duration", None),
+            "segments": transcript_segments,
+        }
+
+    def _transcript_to_srt(self, transcript: dict[str, object]) -> str:
+        blocks: list[str] = []
+        segments = transcript.get("segments")
+        if not isinstance(segments, list):
+            return ""
+        for idx, raw_segment in enumerate(segments, start=1):
+            if not isinstance(raw_segment, dict):
+                continue
+            text = str(raw_segment.get("text") or "").strip()
+            if not text:
+                continue
+            start = self._coerce_seconds(raw_segment.get("start"), default=0.0)
+            end = self._coerce_seconds(raw_segment.get("end"), default=start + 0.1)
+            blocks.append(
+                f"{idx}\n{self._seconds_to_srt_time(start)} --> {self._seconds_to_srt_time(end)}\n{text}"
+            )
+        return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+    def _build_target_dubbing_script(
+        self,
+        source_transcript: dict[str, object],
+        target_language: str,
+        translation_context: str | None = None,
+    ) -> dict[str, object]:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            fallback_text = " ".join(
+                str(segment.get("text") or "").strip()
+                for segment in self._get_transcript_segments(source_transcript)
+                if str(segment.get("text") or "").strip()
+            )
+            return {
+                "target_language": target_language,
+                "style_notes": "OPENAI_API_KEY is not configured; using source transcript text as a fallback script.",
+                "script": fallback_text,
+                "chunks": [
+                    {
+                        "index": segment_index,
+                        "text": str(segment.get("text") or "").strip(),
+                        "source_start": self._coerce_seconds(
+                            segment.get("start"), default=0.0
+                        ),
+                        "source_end": self._coerce_seconds(
+                            segment.get("end"), default=0.0
+                        ),
+                        "pause_after_seconds": self._segment_pause_after(
+                            self._get_transcript_segments(source_transcript),
+                            segment_index,
+                        ),
+                    }
+                    for segment_index, segment in enumerate(
+                        self._get_transcript_segments(source_transcript)
+                    )
+                    if str(segment.get("text") or "").strip()
+                ],
+                "glossary": [],
+            }
+
+        model = os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-4.1-mini")
+        return self._build_target_script_with_openai(
+            openai_api_key=openai_api_key,
+            model=model,
+            target_language=target_language,
+            translation_context=translation_context,
+            source_transcript=source_transcript,
+        )
+
+    def _build_target_script_with_openai(
+        self,
+        *,
+        openai_api_key: str,
+        model: str,
+        target_language: str,
+        translation_context: str | None,
+        source_transcript: dict[str, object],
+    ) -> dict[str, object]:
+        context_instruction = ""
+        if translation_context:
+            context_instruction = (
+                "\n### User Context\n"
+                "Use this context to preserve names, genre, tone, jokes, terminology, "
+                f"and audience expectations: {translation_context}\n"
+            )
+
+        system_text = (
+            "### Persona & Goal\n"
+            "You are a professional dubbing translator, script adapter, and continuity editor. "
+            f"Translate the full source transcript into {target_language} and adapt it into a natural target-language dubbing script with meaningful context, not isolated subtitle lines.\n\n"
+            "### Task Instructions\n"
+            "Read every segment as one continuous scene. Preserve speaker intent, names, story continuity, humor, and emotional tone. "
+            "Use segment start/end times only as pacing hints. Build a script that a TTS/dub provider can speak naturally; do not produce SRT. "
+            "When useful, split the script into ordered chunks and include pauses after chunks so downstream synthesis can insert natural breaks."
+            f"{context_instruction}\n"
+            "### Output Rules\n"
+            "Return ONLY a raw JSON object with keys: target_language, style_notes, script, chunks, glossary. "
+            "chunks must be an array of objects with index, text, source_start, source_end, and pause_after_seconds. "
+            "glossary must be an array, and can be empty. Do not wrap the JSON in markdown."
+        )
+        payload = {
+            "model": model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_text}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": json.dumps(source_transcript, ensure_ascii=False),
+                        }
+                    ],
+                },
+            ],
+        }
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise PipelineError(f"OpenAI target script request failed: {exc}") from exc
+
+        raw_output = self._extract_openai_output_text(response_data)
+        parsed = self._json_load_object(raw_output)
+        if parsed is None:
+            parsed = self._json_load_object(
+                self._strip_markdown_code_fences(raw_output)
+            )
+        if parsed is None:
+            raise PipelineError("OpenAI target script output was not valid JSON")
+        return self._normalize_target_script(parsed, target_language)
+
+    def _json_load_object(self, raw: str) -> dict[str, object] | None:
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return loaded if isinstance(loaded, dict) else None
+
+    def _normalize_target_script(
+        self, script_data: dict[str, object], target_language: str
+    ) -> dict[str, object]:
+        chunks = script_data.get("chunks")
+        normalized_chunks: list[dict[str, object]] = []
+        if isinstance(chunks, list):
+            for idx, raw_chunk in enumerate(chunks):
+                if not isinstance(raw_chunk, dict):
+                    continue
+                text = str(raw_chunk.get("text") or "").strip()
+                if not text:
+                    continue
+                normalized_chunks.append(
+                    {
+                        "index": int(raw_chunk.get("index") or idx),
+                        "text": text,
+                        "source_start": self._coerce_seconds(
+                            raw_chunk.get("source_start"), default=0.0
+                        ),
+                        "source_end": self._coerce_seconds(
+                            raw_chunk.get("source_end"), default=0.0
+                        ),
+                        "pause_after_seconds": self._coerce_seconds(
+                            raw_chunk.get("pause_after_seconds"), default=0.0
+                        ),
+                    }
+                )
+
+        script_text = str(script_data.get("script") or "").strip()
+        if not script_text and normalized_chunks:
+            script_text = " ".join(str(chunk["text"]) for chunk in normalized_chunks)
+        if not script_text:
+            raise PipelineError("Target script is empty")
+        if not normalized_chunks:
+            normalized_chunks = [
+                {
+                    "index": 0,
+                    "text": script_text,
+                    "source_start": 0.0,
+                    "source_end": max(0.1, len(script_text.split()) / 2.5),
+                    "pause_after_seconds": 0.0,
+                }
+            ]
+
+        glossary = script_data.get("glossary")
+        return {
+            "target_language": str(
+                script_data.get("target_language") or target_language
+            ),
+            "style_notes": str(script_data.get("style_notes") or "").strip(),
+            "script": script_text,
+            "chunks": normalized_chunks,
+            "glossary": glossary if isinstance(glossary, list) else [],
+        }
 
     def _transcribe_to_srt(self, source_audio: Path) -> str:
         model_name = os.getenv("WHISPER_MODEL", "small")
@@ -591,6 +937,188 @@ class VideoProcessingWorker:
         )
         return total_seconds
 
+    def _get_transcript_segments(
+        self, transcript: dict[str, object]
+    ) -> list[dict[str, object]]:
+        segments = transcript.get("segments")
+        if not isinstance(segments, list):
+            return []
+        return [segment for segment in segments if isinstance(segment, dict)]
+
+    def _segment_pause_after(
+        self, segments: list[dict[str, object]], segment_index: int
+    ) -> float:
+        if segment_index + 1 >= len(segments):
+            return 0.0
+        current_end = self._coerce_seconds(
+            segments[segment_index].get("end"), default=0.0
+        )
+        next_start = self._coerce_seconds(
+            segments[segment_index + 1].get("start"), default=current_end
+        )
+        return round(max(0.0, next_start - current_end), 3)
+
+    def _coerce_seconds(self, value: object, *, default: float) -> float:
+        if isinstance(value, bool) or value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _synthesize_dubbed_audio_from_script(
+        self,
+        job_id: int,
+        target_script: dict[str, object],
+        job_work_dir: Path,
+        voice_id: str | None = None,
+    ) -> tuple[Path, list[str]]:
+        chunks = target_script.get("chunks")
+        chunk_items = (
+            [chunk for chunk in chunks if isinstance(chunk, dict)]
+            if isinstance(chunks, list)
+            else []
+        )
+        if chunk_items:
+            ssml_text, duration_seconds = self._compile_ssml_from_script_chunks(
+                chunk_items
+            )
+        else:
+            script_text = str(target_script.get("script") or "").strip()
+            if not script_text:
+                raise PipelineError("Target script has no usable text for synthesis")
+            ssml_text = html.escape(" ".join(script_text.split()), quote=False)
+            duration_seconds = max(0.1, len(script_text.split()) / 2.5)
+
+        output_audio = job_work_dir / "dubbed.wav"
+        chunk_requests = [
+            TtsChunkRequest(
+                chunk_index=1,
+                text=ssml_text,
+                output_audio=output_audio,
+                duration_seconds=duration_seconds,
+                voice_id=voice_id,
+            )
+        ]
+        provider_request_ids = self._dub_provider.synthesize_chunks(
+            job_id, chunk_requests
+        )
+        return output_audio, provider_request_ids
+
+    def _compile_ssml_from_script_chunks(
+        self, chunks: list[dict[str, object]]
+    ) -> tuple[str, float]:
+        ssml_parts: list[str] = []
+        latest_source_end = 0.0
+        for chunk in chunks:
+            text = " ".join(str(chunk.get("text") or "").split())
+            if text:
+                ssml_parts.append(html.escape(text, quote=False))
+            pause_after = self._coerce_seconds(
+                chunk.get("pause_after_seconds"), default=0.0
+            )
+            if pause_after > 0.3:
+                ssml_parts.append(f"<break time={pause_after:.2f}s/>")
+            latest_source_end = max(
+                latest_source_end,
+                self._coerce_seconds(chunk.get("source_end"), default=0.0),
+            )
+
+        ssml_text = " ".join(ssml_parts).strip()
+        if not ssml_text:
+            raise PipelineError(
+                "Target script chunks have no usable text for synthesis"
+            )
+        estimated_duration = sum(
+            max(
+                0.0,
+                self._coerce_seconds(chunk.get("source_end"), default=0.0)
+                - self._coerce_seconds(chunk.get("source_start"), default=0.0),
+            )
+            + self._coerce_seconds(chunk.get("pause_after_seconds"), default=0.0)
+            for chunk in chunks
+        )
+        word_duration = len(ssml_text.split()) / 2.5
+        return ssml_text, max(0.1, latest_source_end, estimated_duration, word_duration)
+
+    def _generate_karaoke_ass(self, transcript: dict[str, object]) -> str:
+        events: list[str] = []
+        for segment in self._get_transcript_segments(transcript):
+            start = self._coerce_seconds(segment.get("start"), default=0.0)
+            end = self._coerce_seconds(segment.get("end"), default=start + 0.1)
+            if end <= start:
+                end = start + 0.1
+            text = self._build_ass_karaoke_text(segment, start, end)
+            if not text:
+                continue
+            events.append(
+                "Dialogue: 0,"
+                f"{self._seconds_to_ass_time(start)},{self._seconds_to_ass_time(end)},"
+                f"Default,,0,0,0,,{text}"
+            )
+
+        if not events:
+            raise PipelineError(
+                "Dubbed transcript has no usable text for ASS subtitles"
+            )
+
+        header = """[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,42,&H00FFFFFF,&H0000D7FF,&H00202020,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,56,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        return header + "\n".join(events) + "\n"
+
+    def _build_ass_karaoke_text(
+        self, segment: dict[str, object], start: float, end: float
+    ) -> str:
+        words = segment.get("words")
+        if isinstance(words, list) and words:
+            parts: list[str] = []
+            for raw_word in words:
+                if not isinstance(raw_word, dict):
+                    continue
+                word_text = str(raw_word.get("text") or "").strip()
+                if not word_text:
+                    continue
+                word_start = self._coerce_seconds(raw_word.get("start"), default=start)
+                word_end = self._coerce_seconds(raw_word.get("end"), default=word_start)
+                centiseconds = max(1, round(max(0.01, word_end - word_start) * 100))
+                parts.append(f"{{\\k{centiseconds}}}{self._escape_ass_text(word_text)}")
+            if parts:
+                return " ".join(parts)
+
+        text = str(segment.get("text") or "").strip()
+        if not text:
+            return ""
+        centiseconds = max(1, round(max(0.01, end - start) * 100))
+        return f"{{\\k{centiseconds}}}{self._escape_ass_text(text)}"
+
+    def _escape_ass_text(self, value: str) -> str:
+        return (
+            value.replace("\\", r"\\")
+            .replace("{", r"\{")
+            .replace("}", r"\}")
+            .replace("\n", r"\N")
+        )
+
+    def _seconds_to_ass_time(self, seconds: float) -> str:
+        total_centiseconds = max(0, int(round(seconds * 100)))
+        centiseconds = total_centiseconds % 100
+        total_seconds = total_centiseconds // 100
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        whole_seconds = total_seconds % 60
+        return f"{hours}:{minutes:02d}:{whole_seconds:02d}.{centiseconds:02d}"
+
     def _synthesize_dubbed_audio_from_srt(
         self,
         job_id: int,
@@ -647,7 +1175,9 @@ class VideoProcessingWorker:
             last_end_time = max(last_end_time, end_time)
 
         if first_start_time is None:
-            raise PipelineError("Translated SRT has no usable subtitle blocks for SSML synthesis")
+            raise PipelineError(
+                "Translated SRT has no usable subtitle blocks for SSML synthesis"
+            )
 
         duration_seconds = max(0.1, last_end_time - first_start_time)
         return " ".join(ssml_parts), duration_seconds
@@ -683,11 +1213,14 @@ class VideoProcessingWorker:
         if original_audio_volume < 0:
             raise PipelineError("original_audio_volume must be non-negative")
 
-        subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=50"
-        subtitle_filter = (
-            f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
-            f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
-        )
+        if subtitles.suffix.lower() == ".ass":
+            subtitle_filter = f"ass={self._escape_ffmpeg_filter_path(subtitles)}"
+        else:
+            subtitle_style = "FontSize=12,PrimaryColour=&H00000000,BackColour=&H00FFFFFF,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=50"
+            subtitle_filter = (
+                f"subtitles=filename={self._escape_ffmpeg_filter_path(subtitles)}"
+                f":charenc=UTF-8:force_style={self._escape_ffmpeg_filter_value(subtitle_style)}"
+            )
         tempo_filter = self._build_tempo_filter(output_video_speed)
         filter_complex = ";".join(
             [
