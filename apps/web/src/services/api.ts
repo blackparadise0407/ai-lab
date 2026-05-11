@@ -39,6 +39,7 @@ export async function createJob(
   voiceId?: string | null,
   outputVideoSpeed = 1,
   originalAudioVolume = 0.15,
+  translationContext?: string | null,
 ) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs`, {
     method: 'POST',
@@ -46,6 +47,7 @@ export async function createJob(
     body: JSON.stringify({
       source_language: sourceLanguage,
       target_language: targetLanguage,
+      translation_context: translationContext || null,
       voice_id: voiceId || null,
       output_video_speed: outputVideoSpeed,
       original_audio_volume: originalAudioVolume,
@@ -69,6 +71,23 @@ export async function uploadSourceVideo(jobId: number, file: File) {
 
 export async function getJob(jobId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`);
+  return parseJsonResponse<Job>(response);
+}
+
+export async function deleteJob(jobId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const message = await getResponseErrorMessage(response);
+    throw new Error(message || `${response.status} ${response.statusText}`);
+  }
+}
+
+export async function retryJob(jobId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}/retry`, {
+    method: 'POST',
+  });
   return parseJsonResponse<Job>(response);
 }
 
@@ -123,6 +142,16 @@ export async function getVideoCollections(
 export async function getVideoCollection(collectionId: number) {
   const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}`);
   return parseJsonResponse<VideoCollectionDetail>(response);
+}
+
+export async function deleteVideoCollection(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const message = await getResponseErrorMessage(response);
+    throw new Error(message || `${response.status} ${response.statusText}`);
+  }
 }
 
 export async function getVideoCollectionSegments(collectionId: number) {

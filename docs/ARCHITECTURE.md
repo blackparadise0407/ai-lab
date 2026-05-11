@@ -63,7 +63,7 @@ Responsibilities:
 4. **Translate**: convert ZH text to VI text.
 5. **Chunk TTS input**: split translated subtitles into one synthesis request per SRT cue.
 6. **Synthesize speech**: send cues to the provider in bounded parallel batches and capture returned audio chunks.
-7. **Rebuild dubbed audio**: place each returned chunk at its SRT start timestamp and mix the chunks into one dubbed track.
+7. **Rebuild dubbed audio**: concatenate returned chunks sequentially with short sentence breaks into one dubbed track.
 8. **Finalize media**: merge dubbed audio + subtitles into final video.
 9. **Publish artifacts**: expose signed URLs and mark job complete.
 10. **Publish externally (optional)**: upload the completed video through a selected platform adapter.

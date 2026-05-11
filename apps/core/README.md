@@ -60,9 +60,9 @@ TIKTOK_ACCESS_TOKEN=
 
 If `OPENAI_API_KEY` is not set, subtitle translation falls back to a passthrough mock mode.
 
-If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise SRT-timeline merging. `DUB_TTS_CHUNK_BATCH_SIZE` controls how many cues are synthesized in parallel per batch. Failed chunks are retried without resynthesizing successful chunks in the same batch; configure attempts with `DUB_TTS_CHUNK_MAX_ATTEMPTS` and the initial exponential-backoff delay with `DUB_TTS_CHUNK_RETRY_DELAY_SECONDS`.
+If `DUB_PROVIDER_URL` is not set, TTS synthesis falls back to silent per-cue WAV chunks that still exercise sequential TTS chunk merging. `DUB_TTS_CHUNK_BATCH_SIZE` controls how many cues are synthesized in parallel per batch. Failed chunks are retried without resynthesizing successful chunks in the same batch; configure attempts with `DUB_TTS_CHUNK_MAX_ATTEMPTS` and the initial exponential-backoff delay with `DUB_TTS_CHUNK_RETRY_DELAY_SECONDS`.
 
-`target_language` is taken from the job record (`Job.target_language`) instead of environment configuration. Selected TTS voices are stored per job as `voice_id`; when omitted, synthesis falls back to `DUB_PROVIDER_VOICE_CODE`. The backend exposes `GET /v1/dub-provider/voices` as a cached proxy for the provider voice list so the browser can populate a voice selector without calling Vbee directly.
+`target_language` and optional translation guidance (`translation_context`, max 100 characters) are taken from the job record instead of environment configuration. Selected TTS voices are stored per job as `voice_id`; when omitted, synthesis falls back to `DUB_PROVIDER_VOICE_CODE`. The backend exposes `GET /v1/dub-provider/voices` as a cached proxy for the provider voice list so the browser can populate a voice selector without calling Vbee directly.
 
 ## Provider integration
 

@@ -8,6 +8,7 @@ import {
   Plug,
   PlugZap,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -26,12 +27,14 @@ import type {
 import {
   apiBaseUrl,
   createVideoCollection,
+  deleteJob,
   getArtifactDownloadUrl,
   getArtifactPreviewUrl,
   getArtifacts,
   getDubProviderVoices,
   getJob,
   getProviderRequests,
+  retryJob,
   uploadVideoCollectionSource,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
@@ -108,6 +111,7 @@ export default function DashboardPage() {
   const [targetLanguage, setTargetLanguage] = useState(
     DEFAULT_TARGET_LANGUAGE_CODE,
   );
+  const [translationContext, setTranslationContext] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
   const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
@@ -230,9 +234,15 @@ export default function DashboardPage() {
         throw new Error("Original audio volume must be between 0 and 1.");
       }
 
+      const trimmedTranslationContext = translationContext.trim();
+      if (trimmedTranslationContext.length > 100) {
+        throw new Error("Translation context must be 100 characters or fewer.");
+      }
+
       const collection = await createVideoCollection({
         source_language: sourceLanguage,
         target_language: targetLanguage,
+        translation_context: trimmedTranslationContext || null,
         title: file.name,
         voice_id: voiceId || null,
         output_video_speed: parsedOutputVideoSpeed,
@@ -263,6 +273,37 @@ export default function DashboardPage() {
           "Unable to create the collection and upload the video.",
         ),
       );
+    },
+  });
+
+  const retryJobMutation = useMutation({
+    mutationFn: (jobId: number) => retryJob(jobId),
+    onSuccess: async (retriedJob) => {
+      setFormError(null);
+      queryClient.setQueryData(["job", retriedJob.id], retriedJob);
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+      await refreshDashboard(retriedJob.id);
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to retry this job."));
+    },
+  });
+
+  const deleteJobMutation = useMutation({
+    mutationFn: (jobId: number) => deleteJob(jobId),
+    onSuccess: async (_, deletedJobId) => {
+      setFormError(null);
+      setSelectedJobId(null);
+      setJobIdInput("");
+      queryClient.removeQueries({ queryKey: ["job", deletedJobId] });
+      queryClient.removeQueries({ queryKey: ["artifacts", deletedJobId] });
+      queryClient.removeQueries({
+        queryKey: ["provider-requests", deletedJobId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to delete this job."));
     },
   });
 
@@ -321,6 +362,18 @@ export default function DashboardPage() {
 
     setFormError(null);
     setSelectedJobId(parsedId);
+  }
+
+  function handleRetryJob() {
+    if (!job || job.status !== "failed") return;
+    retryJobMutation.mutate(job.id);
+  }
+
+  function handleDeleteJob() {
+    if (!job) return;
+    if (window.confirm("Delete this job and its local artifact files?")) {
+      deleteJobMutation.mutate(job.id);
+    }
   }
 
   return (
@@ -398,6 +451,24 @@ export default function DashboardPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="translation-context">Translation context</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {translationContext.length}/100
+                  </span>
+                </div>
+                <Input
+                  id="translation-context"
+                  maxLength={100}
+                  placeholder="Optional: names, tone, topic"
+                  value={translationContext}
+                  onChange={(event) => setTranslationContext(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Added to the translation prompt to preserve wording, tone, and names.
+                </p>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="voice-id">Voice</Label>
@@ -598,6 +669,19 @@ export default function DashboardPage() {
                   Refresh now
                 </Button>
               )}
+              {job?.status === "failed" && (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={handleRetryJob}
+                  disabled={retryJobMutation.isPending}
+                >
+                  <RefreshCw
+                    className={cn(retryJobMutation.isPending && "animate-spin")}
+                  />
+                  {retryJobMutation.isPending ? "Retrying…" : "Retry failed job"}
+                </Button>
+              )}
               {job?.status === "completed" && (
                 <Link
                   className={buttonVariants({
@@ -608,6 +692,21 @@ export default function DashboardPage() {
                 >
                   Publish this job
                 </Link>
+              )}
+              {job && (
+                <Button
+                  variant="destructive"
+                  type="button"
+                  onClick={handleDeleteJob}
+                  disabled={deleteJobMutation.isPending}
+                >
+                  {deleteJobMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Trash2 />
+                  )}
+                  {deleteJobMutation.isPending ? "Deleting…" : "Delete job"}
+                </Button>
               )}
             </form>
           </CardContent>
@@ -648,6 +747,11 @@ export default function DashboardPage() {
                   {job.source_language.toUpperCase()} →{" "}
                   {job.target_language.toUpperCase()}
                 </Badge>
+                {job.translation_context && (
+                  <Badge variant="secondary">
+                    Context {job.translation_context}
+                  </Badge>
+                )}
                 <Badge variant="secondary">
                   Voice {job.voice_id || "provider default"}
                 </Badge>
@@ -666,6 +770,11 @@ export default function DashboardPage() {
                 <Badge variant="secondary">
                   {job.current_step ?? "Waiting for next step"}
                 </Badge>
+                {job.error_message && (
+                  <Badge className="bg-red-100 text-red-700">
+                    Error {job.error_message}
+                  </Badge>
+                )}
               </div>
               <ol className="grid gap-3 lg:grid-cols-6">
                 {statusOrder.map((status, index) => (

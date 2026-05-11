@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 
 import { uploadPlatformOptions } from "../../constants/uploadPlatforms";
 import type {
@@ -27,14 +27,19 @@ export function VideosDraft({
   collections,
   error,
   isLoading,
+  onDeleteCollection,
+  onDeleteJob,
   onPageChange,
   onPublish,
   onPublishAll,
   page,
+  pendingDeleteCollectionId,
+  pendingDeleteJobId,
   pageSize,
   pendingPublish,
   providerRequestsByJobId,
   publishError,
+  deleteError,
   segmentsByCollectionId,
   total,
   totalPages,
@@ -42,14 +47,19 @@ export function VideosDraft({
   collections: VideoCollection[];
   error: unknown;
   isLoading: boolean;
+  onDeleteCollection: (collectionId: number) => void;
+  onDeleteJob: (collectionId: number, jobId: number) => void;
   onPageChange: (page: number) => void;
   onPublish: (jobId: number, platform: UploadPlatform) => void;
   onPublishAll: (jobIds: number[], platform: UploadPlatform) => void;
   page: number;
+  pendingDeleteCollectionId: number | null;
+  pendingDeleteJobId: number | null;
   pageSize: number;
   pendingPublish: { jobIds: number[]; platform: UploadPlatform } | null;
   providerRequestsByJobId: Map<number, ProviderRequest[]>;
   publishError: unknown;
+  deleteError: unknown;
   segmentsByCollectionId: Map<number, VideoSegment[]>;
   total: number;
   totalPages: number;
@@ -63,6 +73,12 @@ export function VideosDraft({
       ? getErrorMessage(publishError, "Unable to publish this video.")
       : null,
     "Publish error",
+  );
+  useErrorToast(
+    deleteError
+      ? getErrorMessage(deleteError, "Unable to delete this item.")
+      : null,
+    "Delete error",
   );
 
   return (
@@ -158,6 +174,24 @@ export function VideosDraft({
                             </Button>
                           );
                         })}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
+                          onClick={() => {
+                            if (window.confirm("Delete this collection, all chunk jobs, and local artifact files?")) {
+                              onDeleteCollection(collection.id);
+                            }
+                          }}
+                        >
+                          {pendingDeleteCollectionId === collection.id ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <Trash2 />
+                          )}
+                          Delete collection
+                        </Button>
                       </div>
                     </div>
 
@@ -170,7 +204,7 @@ export function VideosDraft({
                             <th className="px-4 py-3">Job</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Published platforms</th>
-                            <th className="px-4 py-3 text-right">Publish chunk</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y bg-white">
@@ -234,6 +268,24 @@ export function VideosDraft({
                                           </Button>
                                         );
                                       })}
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
+                                        onClick={() => {
+                                          if (window.confirm("Delete this chunk job and its local artifact files?")) {
+                                            onDeleteJob(collection.id, segment.job_id);
+                                          }
+                                        }}
+                                      >
+                                        {pendingDeleteJobId === segment.job_id ? (
+                                          <Loader2 className="animate-spin" />
+                                        ) : (
+                                          <Trash2 />
+                                        )}
+                                        Delete
+                                      </Button>
                                     </div>
                                   </td>
                                 </tr>

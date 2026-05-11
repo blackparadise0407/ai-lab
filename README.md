@@ -10,7 +10,7 @@ AI Lab Dubbing Pipeline is a job-based platform for turning source videos into d
 4. Translate subtitles from Chinese (ZH) to Vietnamese (VI).
 5. Split the translated SRT into per-subtitle TTS chunks.
 6. Generate chunks with the dub provider in bounded parallel batches.
-7. Rebuild the dubbed track by placing each chunk on the SRT timeline.
+7. Rebuild the dubbed track by concatenating TTS chunks sequentially with short sentence breaks.
 8. Merge/mux dubbed audio with the original video and subtitle tracks.
 9. Publish output artifacts.
 

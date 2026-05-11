@@ -7,8 +7,16 @@ from sqlmodel import Session, select
 
 from app.api.job_updates import job_update_broker
 from app.db.database import get_session
-from app.models.entities import Artifact, Job, JobStatus
+from app.models.entities import (
+    Artifact,
+    Job,
+    JobStatus,
+    VideoCollection,
+    VideoSegment,
+)
 from app.schemas.jobs import JobCreateRequest, JobListResponse, JobResponse
+from app.services.deletion import delete_job_and_artifacts
+from app.services.video_collections import refresh_collection_rollup
 from app.workers.video_processor import video_processing_worker
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -29,6 +37,7 @@ def create_job(payload: JobCreateRequest, session: Session = Depends(get_session
         external_job_id=f"job_{uuid4().hex[:12]}",
         source_language=payload.source_language,
         target_language=payload.target_language,
+        translation_context=payload.translation_context,
         voice_id=payload.voice_id,
         output_video_speed=payload.output_video_speed,
         original_audio_volume=payload.original_audio_volume,
@@ -98,6 +107,71 @@ async def upload_source_video(
     job_update_broker.notify(job.id, "source_video_uploaded")
     video_processing_worker.enqueue(job_id=job.id)
     return job
+
+
+@router.post(
+    "/{job_id}/retry",
+    response_model=JobResponse,
+    summary="Retry failed job",
+    description="Re-queues a failed job for processing using its existing source video artifact.",
+)
+def retry_job(job_id: int, session: Session = Depends(get_session)):
+    job = session.exec(select(Job).where(Job.id == job_id)).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != JobStatus.FAILED:
+        raise HTTPException(status_code=409, detail="Only failed jobs can be retried")
+
+    source_artifact = session.exec(
+        select(Artifact).where(
+            Artifact.job_id == job_id,
+            Artifact.artifact_type == SOURCE_VIDEO_ARTIFACT_TYPE,
+        )
+    ).first()
+    if not source_artifact:
+        raise HTTPException(status_code=400, detail="Job has no source video to retry")
+
+    source_video_path = Path(source_artifact.storage_url)
+    if not source_video_path.exists():
+        raise HTTPException(status_code=400, detail="Source video file not found")
+
+    retry_from_step = job.current_step
+    job.status = JobStatus.UPLOADED
+    job.current_step = "retry_queued"
+    job.progress_percent = max(job.progress_percent, 5)
+    job.error_code = None
+    job.error_message = None
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    video_segment = session.exec(
+        select(VideoSegment).where(VideoSegment.job_id == job_id)
+    ).first()
+    if video_segment:
+        collection = session.get(VideoCollection, video_segment.collection_id)
+        if collection:
+            refresh_collection_rollup(session, collection)
+
+    job_update_broker.notify(job.id, "job_retry_queued")
+    video_processing_worker.enqueue(job_id=job.id, retry_from_step=retry_from_step)
+    return job
+
+
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    summary="Delete job",
+    description="Deletes a job, its provider request history, database artifact records, and local artifact files.",
+)
+def delete_job(job_id: int, session: Session = Depends(get_session)):
+    job = session.exec(select(Job).where(Job.id == job_id)).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    delete_job_and_artifacts(session, job)
+    return None
 
 
 @router.get(

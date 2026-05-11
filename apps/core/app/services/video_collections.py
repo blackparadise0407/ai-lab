@@ -25,8 +25,8 @@ def refresh_collection_rollup(session: Session, collection: VideoCollection) -> 
         for segment in segments
         if jobs_by_id.get(segment.job_id) is not None and jobs_by_id[segment.job_id].status == JobStatus.COMPLETED
     )
-    next_progress_percent = collection.progress_percent
-    next_status = collection.status
+    next_progress_percent = 0
+    next_status = JobStatus.CREATED
 
     if segments:
         next_progress_percent = round(

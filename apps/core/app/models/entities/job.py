@@ -11,6 +11,7 @@ class Job(SQLModel, table=True):
     external_job_id: str = Field(index=True, unique=True, max_length=64)
     source_language: str = Field(default="zh", max_length=8)
     target_language: str = Field(default="vi", max_length=8)
+    translation_context: Optional[str] = Field(default=None, max_length=100)
     voice_id: Optional[str] = Field(default=None, max_length=128)
     output_video_speed: float = Field(default=1.0, gt=0, le=4)
     original_audio_volume: float = Field(default=0.15, ge=0, le=1)
