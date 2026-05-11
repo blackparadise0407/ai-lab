@@ -515,10 +515,6 @@ class VideoProcessingWorker:
                         "source_end": self._coerce_seconds(
                             segment.get("end"), default=0.0
                         ),
-                        "pause_after_seconds": self._segment_pause_after(
-                            self._get_transcript_segments(source_transcript),
-                            segment_index,
-                        ),
                     }
                     for segment_index, segment in enumerate(
                         self._get_transcript_segments(source_transcript)
@@ -561,11 +557,11 @@ class VideoProcessingWorker:
             "### Task Instructions\n"
             "Read every segment as one continuous scene. Preserve speaker intent, names, story continuity, humor, and emotional tone. "
             "Use segment start/end times only as pacing hints. Build a script that a TTS/dub provider can speak naturally; do not produce SRT. "
-            "When useful, split the script into ordered chunks and include pauses after chunks so downstream synthesis can insert natural breaks."
+            "When useful, split the script into ordered chunks for downstream synthesis."
             f"{context_instruction}\n"
             "### Output Rules\n"
             "Return ONLY a raw JSON object with keys: target_language, style_notes, script, chunks, glossary. "
-            "chunks must be an array of objects with index, text, source_start, source_end, and pause_after_seconds. "
+            "chunks must be an array of objects with index, text, source_start, and source_end. "
             "glossary must be an array, and can be empty. Do not wrap the JSON in markdown."
         )
         payload = {
@@ -640,9 +636,6 @@ class VideoProcessingWorker:
                         "source_end": self._coerce_seconds(
                             raw_chunk.get("source_end"), default=0.0
                         ),
-                        "pause_after_seconds": self._coerce_seconds(
-                            raw_chunk.get("pause_after_seconds"), default=0.0
-                        ),
                     }
                 )
 
@@ -658,7 +651,6 @@ class VideoProcessingWorker:
                     "text": script_text,
                     "source_start": 0.0,
                     "source_end": max(0.1, len(script_text.split()) / 2.5),
-                    "pause_after_seconds": 0.0,
                 }
             ]
 
@@ -960,19 +952,6 @@ class VideoProcessingWorker:
             return []
         return [segment for segment in segments if isinstance(segment, dict)]
 
-    def _segment_pause_after(
-        self, segments: list[dict[str, object]], segment_index: int
-    ) -> float:
-        if segment_index + 1 >= len(segments):
-            return 0.0
-        current_end = self._coerce_seconds(
-            segments[segment_index].get("end"), default=0.0
-        )
-        next_start = self._coerce_seconds(
-            segments[segment_index + 1].get("start"), default=current_end
-        )
-        return round(max(0.0, next_start - current_end), 3)
-
     def _coerce_seconds(self, value: object, *, default: float) -> float:
         if isinstance(value, bool) or value is None:
             return default
@@ -1029,11 +1008,6 @@ class VideoProcessingWorker:
             text = " ".join(str(chunk.get("text") or "").split())
             if text:
                 ssml_parts.append(html.escape(text, quote=False))
-            pause_after = self._coerce_seconds(
-                chunk.get("pause_after_seconds"), default=0.0
-            )
-            if pause_after > 0.3:
-                ssml_parts.append(f"<break time={pause_after:.2f}s/>")
             latest_source_end = max(
                 latest_source_end,
                 self._coerce_seconds(chunk.get("source_end"), default=0.0),
@@ -1050,7 +1024,6 @@ class VideoProcessingWorker:
                 self._coerce_seconds(chunk.get("source_end"), default=0.0)
                 - self._coerce_seconds(chunk.get("source_start"), default=0.0),
             )
-            + self._coerce_seconds(chunk.get("pause_after_seconds"), default=0.0)
             for chunk in chunks
         )
         word_duration = len(ssml_text.split()) / 2.5

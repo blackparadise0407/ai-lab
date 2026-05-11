@@ -129,14 +129,12 @@ def test_openai_target_script_prompt_builds_contextual_dub_script() -> None:
                                     "text": "Xin chào cả nhà.",
                                     "source_start": 1.0,
                                     "source_end": 2.0,
-                                    "pause_after_seconds": 0.5,
                                 },
                                 {
                                     "index": 1,
                                     "text": "Đi thôi!",
                                     "source_start": 2.5,
                                     "source_end": 3.5,
-                                    "pause_after_seconds": 0,
                                 },
                             ],
                             "glossary": [],
@@ -178,6 +176,8 @@ def test_openai_target_script_prompt_builds_contextual_dub_script() -> None:
     assert "meaningful context" in system_text
     assert "wuxia comedy" in system_text
     assert "Vietnamese" in system_text
+    assert "pause_after_seconds" not in system_text
+    assert "pauses after chunks" not in system_text
     assert user_transcript == source_transcript
 
 
