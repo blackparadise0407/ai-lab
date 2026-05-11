@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
   ExternalLink,
+  Eye,
   Loader2,
   Plug,
   PlugZap,
@@ -879,34 +880,97 @@ function DataPanel({
 }
 
 function ArtifactRow({ artifact }: { artifact: Artifact }) {
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const previewUrl = getArtifactPreviewUrl(artifact);
+
   return (
-    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
-      <div>
-        <strong>{artifact.artifact_type}</strong>
-        <p className="mt-1 break-all text-sm text-muted-foreground">
-          {artifact.content_type ?? "Unknown content type"}
-        </p>
+    <article className="flex flex-col gap-4 rounded-2xl border bg-slate-50 p-4">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <strong>{artifact.artifact_type}</strong>
+          <p className="mt-1 break-all text-sm text-muted-foreground">
+            {artifact.content_type ?? "Unknown content type"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setIsPreviewOpen((current) => !current)}
+            aria-expanded={isPreviewOpen}
+          >
+            <Eye />
+            {isPreviewOpen ? "Hide preview" : "Preview"}
+          </Button>
+          <a
+            className={buttonVariants({ variant: "secondary", size: "sm" })}
+            href={previewUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink />
+            Open
+          </a>
+          <a
+            className={buttonVariants({ variant: "secondary", size: "sm" })}
+            href={getArtifactDownloadUrl(artifact)}
+            download
+          >
+            <Download />
+            Download
+          </a>
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <a
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-          href={getArtifactDownloadUrl(artifact)}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <ExternalLink />
-          Open
-        </a>
-        <a
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-          href={getArtifactDownloadUrl(artifact)}
-          download
-        >
-          <Download />
-          Download
-        </a>
-      </div>
+      {isPreviewOpen && <ArtifactPreview artifact={artifact} previewUrl={previewUrl} />}
     </article>
+  );
+}
+
+function ArtifactPreview({
+  artifact,
+  previewUrl,
+}: {
+  artifact: Artifact;
+  previewUrl: string;
+}) {
+  const contentType = artifact.content_type ?? "";
+
+  if (contentType.startsWith("video/")) {
+    return (
+      <video
+        className="max-h-96 w-full rounded-xl bg-black"
+        controls
+        preload="metadata"
+        src={previewUrl}
+      >
+        <a href={previewUrl} target="_blank" rel="noreferrer">
+          Open video preview
+        </a>
+      </video>
+    );
+  }
+
+  if (contentType.startsWith("audio/")) {
+    return <audio className="w-full" controls preload="metadata" src={previewUrl} />;
+  }
+
+  if (contentType.startsWith("image/")) {
+    return (
+      <img
+        alt={`${artifact.artifact_type} preview`}
+        className="max-h-96 w-full rounded-xl object-contain"
+        src={previewUrl}
+      />
+    );
+  }
+
+  return (
+    <iframe
+      className="h-96 w-full rounded-xl border bg-white"
+      src={previewUrl}
+      title={`${artifact.artifact_type} preview`}
+    />
   );
 }
 
