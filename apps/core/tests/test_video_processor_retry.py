@@ -46,7 +46,7 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(
     )
     target_script = job_work_dir / "target_script.json"
     target_script.write_text(
-        '{"target_language":"vi","script":"Xin chào","chunks":[{"index":0,"text":"Xin chào","source_start":0,"source_end":1,"pause_after_seconds":0}],"glossary":[]}',
+        '{"target_language":"vi","script":"Xin chào","chunks":[{"index":0,"text":"Xin chào","source_start":0,"source_end":1}],"glossary":[]}',
         encoding="utf-8",
     )
     dubbed_audio = job_work_dir / "dubbed.wav"
