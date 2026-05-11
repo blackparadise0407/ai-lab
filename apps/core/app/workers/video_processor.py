@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -380,14 +381,22 @@ class VideoProcessingWorker:
         self, blocks: list[tuple[str, str, str]]
     ) -> list[dict[str, object]]:
         cues: list[dict[str, object]] = []
+        timing_ranges = [
+            self._parse_srt_timing_range(timing) for _sequence, timing, _text in blocks
+        ]
         for index, (_sequence, timing, text) in enumerate(blocks):
-            start_time, end_time = self._parse_srt_timing_range(timing)
+            start_time, end_time = timing_ranges[index]
             duration_seconds = max(0.0, end_time - start_time)
+            break_after_seconds = 0.0
+            if index + 1 < len(timing_ranges):
+                next_start_time, _next_end_time = timing_ranges[index + 1]
+                break_after_seconds = max(0.0, next_start_time - end_time)
             cues.append(
                 {
                     "index": index,
                     "timing": timing,
                     "duration_seconds": round(duration_seconds, 3),
+                    "break_after_seconds": round(break_after_seconds, 3),
                     "text": text,
                 }
             )
@@ -410,22 +419,24 @@ class VideoProcessingWorker:
             )
 
         system_text = (
-            "You are an expert subtitle translator and dubbing script editor. "
-            f"Your goal is to translate SRT cues into {target_language} while ensuring the spoken duration of the translation perfectly matches the original audio timing.\n\n"
+            "### Persona & Goal\n"
+            "You are a professional Subtitle Translator and Dubbing Script Editor. "
+            f"Your goal is to translate SRT cues into {target_language} while ensuring isochrony: the spoken duration of each translation must fit the original timing provided in `duration_seconds`.\n\n"
             "### Task Instructions\n"
-            "Translate the `text` field of each provided SRT object. Use the `duration_seconds` field as a hard constraint for the length of the translation."
+            f"Translate the `text` field of each provided JSON object into {target_language}. Read the entire ordered cue list as one continuous dubbing script so you can maintain sentence flow, tone, and natural punctuation across cue boundaries. Use `break_after_seconds` to understand how much silence follows a cue. Add reasonable commas or periods where the full translated script needs natural pauses, and treat any break greater than 0.3 seconds as an SSML pause that will be compiled as `<break time={{seconds:.2f}}s/>` during synthesis.\n"
             f"{context_instruction}\n"
-            "### Rules you MUST follow (in priority order):\n"
-            '1. **Output Format:** Return ONLY a JSON array of strings (e.g., ["translation 1", "translation 2"]). No markdown, no prose, and no extra JSON keys.\n'
-            "2. **1:1 Mapping:** The output array must contain exactly the same number of elements as the input array. Do not merge, skip, or split cues.\n"
-            '3. **The "Dubbing" Constraint (Isynchrony):**\n'
-            "   - Each translation must be speakable at a natural pace within its `duration_seconds`.\n"
-            "   - **Priority:** Brevity and timing > Literal word-for-word accuracy.\n"
-            "   - Use shorter synonyms, contractions, or natural ellipses to ensure the line fits the time window without rushing the voice actor.\n"
-            "4. **Sentence Continuity:** If a sentence spans across multiple cues, ensure the grammar remains coherent across the breaks while respecting the individual timing of each fragment.\n"
-            "5. **Non-Speech Elements:** Preserve all tags in brackets (e.g., `[music]`, `[laughter]`) or speaker identifiers (e.g., `MAN:`) exactly as they appear.\n"
-            f"6. **Naturalness:** Write fluent, idiomatic {target_language} with a natural spoken tone. Use nearby cues as context for formality and gender consistency.\n"
-            f"7. **Fallback:** If a cue is already in {target_language} or contains no translatable text, copy the original string verbatim."
+            "### Strict Rules (Priority Order):\n"
+            '1. **Output Format:** Return ONLY a raw JSON array of strings (e.g., ["Translated text 1", "Translated text 2"]). Do not use markdown code blocks, introductory text, concluding text, or extra JSON keys.\n'
+            '2. **The "Dubbing" Constraint (Timing is King):**\n'
+            "   - **Hard Constraint:** Each translation must be speakable at a natural, conversational pace within its `duration_seconds`.\n"
+            "   - **Priority:** Timing and brevity > literal accuracy.\n"
+            "   - If a literal translation is too long, use shorter synonyms, compress phrasing, or omit non-essential filler words. The line must fit without forcing the voice actor to speak unnaturally fast.\n"
+            "3. **1:1 Mapping:** The output array must contain exactly the same number of elements as the input array. Do not merge, skip, or split cues.\n"
+            "4. **Sentence Continuity:** If a sentence spans multiple cues, ensure grammatical flow and tone are maintained across the breaks while respecting the duration of each individual fragment.\n"
+            "5. **SSML Break Awareness:** Do not include SSML tags in the JSON strings. Use `break_after_seconds` only to choose punctuation; the application will insert `<break time=.../>` tags for pauses greater than 0.3 seconds when compiling SSML.\n"
+            "6. **Non-Speech Elements:** Preserve all tags in brackets (e.g., [music], [laughter]) or speaker identifiers (e.g., MAN:) exactly as they appear.\n"
+            f"7. **Naturalness:** Use idiomatic, spoken-style {target_language}. Ensure pronouns and levels of formality are consistent throughout the batch.\n"
+            f"8. **Fallback:** If a cue is already in {target_language} or contains no translatable text, copy the original string verbatim."
         )
 
         payload = {
@@ -590,98 +601,56 @@ class VideoProcessingWorker:
         blocks = self._parse_srt_blocks(translated_srt)
         if not blocks:
             raise PipelineError(
-                "Translated SRT has no usable subtitle blocks for chunked synthesis"
+                "Translated SRT has no usable subtitle blocks for SSML synthesis"
             )
 
-        chunks_dir = job_work_dir / "tts_chunks"
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        chunk_specs: list[tuple[float, float, Path]] = []
-        chunk_requests: list[TtsChunkRequest] = []
-        for chunk_index, (_sequence, timing, text) in enumerate(blocks, start=1):
-            start_time, end_time = self._parse_srt_timing_range(timing)
-            if end_time < start_time:
-                raise PipelineError(f"Invalid SRT timing range: {timing}")
-            chunk_audio_path = chunks_dir / f"chunk_{chunk_index:04}.wav"
-            duration_seconds = max(0.1, end_time - start_time)
-            chunk_requests.append(
-                TtsChunkRequest(
-                    chunk_index=chunk_index,
-                    text=text,
-                    output_audio=chunk_audio_path,
-                    duration_seconds=duration_seconds,
-                    voice_id=voice_id,
-                )
+        output_audio = job_work_dir / "dubbed.wav"
+        ssml_text, duration_seconds = self._compile_ssml_from_srt_blocks(blocks)
+        chunk_requests = [
+            TtsChunkRequest(
+                chunk_index=1,
+                text=ssml_text,
+                output_audio=output_audio,
+                duration_seconds=duration_seconds,
+                voice_id=voice_id,
             )
-            chunk_specs.append((start_time, end_time, chunk_audio_path))
-
+        ]
         provider_request_ids = self._dub_provider.synthesize_chunks(
             job_id, chunk_requests
         )
-        output_audio = job_work_dir / "dubbed.wav"
-        self._merge_tts_chunks(chunk_specs, output_audio)
         return output_audio, provider_request_ids
 
-    def _merge_tts_chunks(
-        self, chunk_specs: list[tuple[float, float, Path]], output_audio: Path
-    ) -> None:
-        if not chunk_specs:
-            raise PipelineError("No TTS chunks were generated")
+    def _compile_ssml_from_srt_blocks(
+        self, blocks: list[tuple[str, str, str]]
+    ) -> tuple[str, float]:
+        ssml_parts: list[str] = []
+        first_start_time: float | None = None
+        previous_end_time: float | None = None
+        last_end_time = 0.0
 
-        sentence_break_seconds = 0.3
-        cmd = ["ffmpeg", "-y"]
-        for _start_time, _end_time, chunk_path in chunk_specs:
-            cmd.extend(["-i", str(chunk_path)])
-        cmd.extend(
-            [
-                "-f",
-                "lavfi",
-                "-t",
-                f"{sentence_break_seconds:.3f}",
-                "-i",
-                "anullsrc=r=48000:cl=stereo",
-            ]
-        )
+        for _sequence, timing, text in blocks:
+            start_time, end_time = self._parse_srt_timing_range(timing)
+            if end_time < start_time:
+                raise PipelineError(f"Invalid SRT timing range: {timing}")
+            if first_start_time is None:
+                first_start_time = start_time
+            if previous_end_time is not None:
+                break_seconds = max(0.0, start_time - previous_end_time)
+                if break_seconds > 0.3:
+                    ssml_parts.append(f"<break time={break_seconds:.2f}s/>")
 
-        filter_parts: list[str] = []
-        concat_labels: list[str] = []
-        audio_format = (
-            "aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo"
-        )
-        silence_labels = [f"s{input_index}" for input_index in range(len(chunk_specs))]
-        if len(silence_labels) == 1:
-            filter_parts.append(
-                f"[{len(chunk_specs)}:a]{audio_format}[{silence_labels[0]}]"
-            )
-        else:
-            silence_outputs = "".join(f"[{label}]" for label in silence_labels)
-            filter_parts.append(
-                f"[{len(chunk_specs)}:a]{audio_format},asplit={len(chunk_specs)}{silence_outputs}"
-            )
+            normalized_text = " ".join(text.split())
+            if normalized_text:
+                ssml_parts.append(html.escape(normalized_text, quote=False))
 
-        for input_index, _chunk_spec in enumerate(chunk_specs):
-            chunk_label = f"a{input_index}"
-            filter_parts.append(f"[{input_index}:a]{audio_format}[{chunk_label}]")
-            concat_labels.extend(
-                [f"[{chunk_label}]", f"[{silence_labels[input_index]}]"]
-            )
+            previous_end_time = end_time
+            last_end_time = max(last_end_time, end_time)
 
-        filter_parts.append(
-            "".join(concat_labels)
-            + f"concat=n={len(concat_labels)}:v=0:a=1,aresample=48000[aout]"
-        )
+        if first_start_time is None:
+            raise PipelineError("Translated SRT has no usable subtitle blocks for SSML synthesis")
 
-        cmd.extend(
-            [
-                "-filter_complex",
-                ";".join(filter_parts),
-                "-map",
-                "[aout]",
-                "-c:a",
-                "pcm_s16le",
-                str(output_audio),
-            ]
-        )
-        self._run_cmd(cmd, "TTS chunk merge failed")
+        duration_seconds = max(0.1, last_end_time - first_start_time)
+        return " ".join(ssml_parts), duration_seconds
 
     def _split_atempo_factors(self, speedup: float) -> list[float]:
         if speedup <= 0:

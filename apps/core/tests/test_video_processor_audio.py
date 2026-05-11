@@ -5,53 +5,6 @@ from pathlib import Path
 from app.workers.video_processor import VideoProcessingWorker
 
 
-def capture_merge_command(worker: VideoProcessingWorker, tmp_path: Path) -> list[str]:
-    captured: dict[str, list[str]] = {}
-
-    def capture_cmd(cmd: list[str], error_message: str) -> None:
-        captured["cmd"] = cmd
-        captured["error_message"] = [error_message]
-
-    worker._run_cmd = capture_cmd  # type: ignore[method-assign]
-
-    worker._merge_tts_chunks(
-        [
-            (0.0, 1.0, Path("chunk_0001.wav")),
-            (1.0, 2.0, Path("chunk_0002.wav")),
-            (2.0, 3.0, Path("chunk_0003.wav")),
-        ],
-        tmp_path / "dubbed.wav",
-    )
-
-    return captured["cmd"]
-
-
-def test_merge_tts_chunks_concatenates_sequentially_with_sentence_breaks(
-    tmp_path,
-) -> None:
-    worker = VideoProcessingWorker()
-
-    cmd = capture_merge_command(worker, tmp_path)
-    filter_complex = cmd[cmd.index("-filter_complex") + 1]
-
-    assert "-t" in cmd
-    assert cmd[cmd.index("-t") + 1] == "0.300"
-    assert "anullsrc=r=48000:cl=stereo" in cmd
-    assert "asplit=3[s0][s1][s2]" in filter_complex
-    assert "[a0][s0][a1][s1][a2][s2]concat=n=6:v=0:a=1" in filter_complex
-
-
-def test_merge_tts_chunks_does_not_speed_up_long_chunks(tmp_path) -> None:
-    worker = VideoProcessingWorker()
-
-    cmd = capture_merge_command(worker, tmp_path)
-    filter_complex = cmd[cmd.index("-filter_complex") + 1]
-
-    assert "atempo" not in filter_complex
-    assert "adelay" not in filter_complex
-    assert "amix" not in filter_complex
-
-
 def test_mux_audio_applies_output_speed_and_original_audio_volume(tmp_path) -> None:
     worker = VideoProcessingWorker()
     captured: dict[str, list[str]] = {}
@@ -88,3 +41,49 @@ def test_tempo_filter_supports_slow_output_speed() -> None:
     worker = VideoProcessingWorker()
 
     assert worker._build_tempo_filter(0.25) == "atempo=0.5,atempo=0.5"
+
+
+def test_compile_ssml_from_srt_blocks_inserts_timed_breaks_and_escapes_text() -> None:
+    worker = VideoProcessingWorker()
+
+    ssml_text, duration_seconds = worker._compile_ssml_from_srt_blocks(
+        [
+            ("1", "00:00:01,000 --> 00:00:02,000", "Xin chào & chào mừng"),
+            ("2", "00:00:02,200 --> 00:00:03,000", "đến đây"),
+            ("3", "00:00:03,750 --> 00:00:04,500", "nhé"),
+        ]
+    )
+
+    assert ssml_text == "Xin chào &amp; chào mừng đến đây <break time=0.75s/> nhé"
+    assert duration_seconds == 3.5
+
+
+def test_synthesize_dubbed_audio_from_srt_submits_one_compiled_ssml_request(tmp_path) -> None:
+    worker = VideoProcessingWorker()
+    captured: dict[str, object] = {}
+
+    def synthesize_chunks(job_id, chunk_requests):  # noqa: ANN001
+        captured["job_id"] = job_id
+        captured["chunk_requests"] = chunk_requests
+        return ["provider-request-1"]
+
+    worker._dub_provider.synthesize_chunks = synthesize_chunks  # type: ignore[method-assign]
+
+    output_audio, provider_request_ids = worker._synthesize_dubbed_audio_from_srt(
+        42,
+        "1\n00:00:01,000 --> 00:00:02,000\nXin chào\n\n"
+        "2\n00:00:02,600 --> 00:00:03,500\nđi thôi\n",
+        tmp_path,
+        voice_id="voice-1",
+    )
+
+    chunk_requests = captured["chunk_requests"]
+    assert captured["job_id"] == 42
+    assert len(chunk_requests) == 1
+    assert chunk_requests[0].chunk_index == 1
+    assert chunk_requests[0].text == "Xin chào <break time=0.60s/> đi thôi"
+    assert chunk_requests[0].output_audio == tmp_path / "dubbed.wav"
+    assert chunk_requests[0].duration_seconds == 2.5
+    assert chunk_requests[0].voice_id == "voice-1"
+    assert output_audio == tmp_path / "dubbed.wav"
+    assert provider_request_ids == ["provider-request-1"]
