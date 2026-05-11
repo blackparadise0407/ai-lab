@@ -179,3 +179,15 @@ def test_openai_target_script_prompt_builds_contextual_dub_script() -> None:
     assert "wuxia comedy" in system_text
     assert "Vietnamese" in system_text
     assert user_transcript == source_transcript
+
+
+def test_normalize_whisper_language_code_accepts_provider_locales() -> None:
+    worker = VideoProcessingWorker()
+
+    assert worker._normalize_whisper_language_code("vi-VN") == "vi"
+    assert worker._normalize_whisper_language_code("en_US") == "en"
+    assert worker._normalize_whisper_language_code("cmn-CN") == "zh"
+    assert worker._normalize_whisper_language_code("fil-PH") == "tl"
+    assert worker._normalize_whisper_language_code("yue-HK") == "yue"
+    assert worker._normalize_whisper_language_code(" nb-NO ") == "no"
+    assert worker._normalize_whisper_language_code(None) == ""

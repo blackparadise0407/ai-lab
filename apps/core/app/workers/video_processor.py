@@ -40,6 +40,12 @@ WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
 logger = logging.getLogger(__name__)
 
+WHISPER_LANGUAGE_ALIASES = {
+    "cmn": "zh",
+    "fil": "tl",
+    "nb": "no",
+}
+
 
 class PipelineError(RuntimeError):
     """Raised when a pipeline step fails with a user-visible error."""
@@ -397,6 +403,15 @@ class VideoProcessingWorker:
             raise PipelineError(f"JSON artifact must be an object: {path}")
         return value
 
+    @staticmethod
+    def _normalize_whisper_language_code(language: str | None) -> str:
+        normalized_language = (language or "").strip().replace("_", "-")
+        if not normalized_language:
+            return ""
+
+        primary_subtag = normalized_language.split("-", 1)[0].lower()
+        return WHISPER_LANGUAGE_ALIASES.get(primary_subtag, primary_subtag)
+
     def _transcribe_audio(
         self,
         source_audio: Path,
@@ -411,7 +426,7 @@ class VideoProcessingWorker:
             "vad_filter": True,
             "word_timestamps": word_timestamps,
         }
-        normalized_language = (language or "").strip()
+        normalized_language = self._normalize_whisper_language_code(language)
         if normalized_language:
             transcribe_kwargs["language"] = normalized_language
 
