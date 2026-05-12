@@ -6,6 +6,7 @@ import logging
 import os
 import queue
 import re
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -51,6 +52,10 @@ class PipelineError(RuntimeError):
     """Raised when a pipeline step fails with a user-visible error."""
 
 
+class JobCanceled(RuntimeError):
+    """Raised when a job cancellation should stop pipeline execution."""
+
+
 class VideoProcessingWorker:
     def __init__(self) -> None:
         self._queue: queue.Queue[tuple[int, str | None]] = queue.Queue()
@@ -86,6 +91,9 @@ class VideoProcessingWorker:
     def _process_job(self, job_id: int, retry_from_step: str | None = None) -> None:
         try:
             self._process_job_impl(job_id, retry_from_step=retry_from_step)
+        except JobCanceled:
+            logger.info("Video processing canceled for job_id=%s", job_id)
+            self._mark_job_canceled(job_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Video processing failed for job_id=%s", job_id)
             self._mark_job_failed(job_id, "pipeline_error", str(exc))
@@ -145,7 +153,8 @@ class VideoProcessingWorker:
             )
         else:
             self._update_job(job_id, "extracting_audio", 10)
-            self._extract_audio(source_video_path, source_audio_path)
+            self._extract_audio(source_video_path, source_audio_path, job_id=job_id)
+            self._raise_if_canceled(job_id)
 
         if (
             self._can_retry_after_step(retry_from_step, "building_target_script")
@@ -159,9 +168,11 @@ class VideoProcessingWorker:
             )
         else:
             self._update_job(job_id, "transcribing_source", 25)
+            self._raise_if_canceled(job_id)
             source_transcript = self._transcribe_audio(
                 source_audio_path, language=job.source_language, word_timestamps=False
             )
+            self._raise_if_canceled(job_id)
             source_transcript_path.write_text(
                 json.dumps(source_transcript, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -182,9 +193,11 @@ class VideoProcessingWorker:
             )
         else:
             self._update_job(job_id, "building_target_script", 45)
+            self._raise_if_canceled(job_id)
             target_script = self._build_target_dubbing_script(
                 source_transcript, target_language, translation_context
             )
+            self._raise_if_canceled(job_id)
             target_script_path.write_text(
                 json.dumps(target_script, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -208,6 +221,7 @@ class VideoProcessingWorker:
                 60,
                 status=JobStatus.WAITING_PROVIDER,
             )
+            self._raise_if_canceled(job_id)
             tts_audio_path, provider_request_ids = (
                 self._synthesize_dubbed_audio_from_script(
                     job_id,
@@ -216,6 +230,7 @@ class VideoProcessingWorker:
                     voice_id,
                 )
             )
+            self._raise_if_canceled(job_id)
 
         if (
             self._can_retry_after_step(retry_from_step, "generating_ass")
@@ -229,9 +244,11 @@ class VideoProcessingWorker:
             )
         else:
             self._update_job(job_id, "transcribing_dub", 75)
+            self._raise_if_canceled(job_id)
             dubbed_transcript = self._transcribe_audio(
                 tts_audio_path, language=target_language, word_timestamps=True
             )
+            self._raise_if_canceled(job_id)
             dubbed_transcript_path.write_text(
                 json.dumps(dubbed_transcript, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -248,6 +265,7 @@ class VideoProcessingWorker:
             )
         else:
             self._update_job(job_id, "generating_ass", 82)
+            self._raise_if_canceled(job_id)
             ass_subtitle_path.write_text(
                 self._generate_karaoke_ass(dubbed_transcript), encoding="utf-8"
             )
@@ -262,6 +280,7 @@ class VideoProcessingWorker:
                 session, job, "muxing", 90, status=JobStatus.FINALIZING
             )
 
+        self._raise_if_canceled(job_id)
         output_path = PROCESSED_OUTPUT_DIR / f"job_{job_id}_dubbed.mp4"
         self._mux_audio(
             source_video_path,
@@ -270,12 +289,16 @@ class VideoProcessingWorker:
             output_path,
             output_video_speed=output_video_speed,
             original_audio_volume=original_audio_volume,
+            job_id=job_id,
         )
+        self._raise_if_canceled(job_id)
 
         with Session(engine) as session:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
+            if job.status == JobStatus.CANCELED:
+                raise JobCanceled()
 
             self._upsert_artifact(
                 session, job_id, PROCESSED_ARTIFACT_TYPE, output_path, "video/mp4"
@@ -377,7 +400,9 @@ class VideoProcessingWorker:
                 return
             self._update_job_progress(session, job, step, progress, status=status)
 
-    def _extract_audio(self, source_video: Path, output_audio: Path) -> None:
+    def _extract_audio(
+        self, source_video: Path, output_audio: Path, *, job_id: int | None = None
+    ) -> None:
         cmd = [
             "ffmpeg",
             "-y",
@@ -392,7 +417,7 @@ class VideoProcessingWorker:
             "pcm_s16le",
             str(output_audio),
         ]
-        self._run_cmd(cmd, "audio extraction failed")
+        self._run_cmd(cmd, "audio extraction failed", job_id=job_id)
 
     def _read_json_file(self, path: Path) -> dict[str, object]:
         try:
@@ -1195,6 +1220,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         *,
         output_video_speed: float = 1.0,
         original_audio_volume: float = 0.15,
+        job_id: int | None = None,
     ) -> None:
         if output_video_speed <= 0:
             raise PipelineError("output_video_speed must be positive")
@@ -1244,7 +1270,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "-shortest",
             str(output_video),
         ]
-        self._run_cmd(cmd, "audio/video/subtitle burn-in failed")
+        self._run_cmd(cmd, "audio/video/subtitle burn-in failed", job_id=job_id)
 
     def _build_tempo_filter(self, speed: float) -> str:
         if abs(speed - 1.0) <= 0.000001:
@@ -1263,8 +1289,40 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     def _escape_ffmpeg_filter_value(self, value: str) -> str:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
-    def _run_cmd(self, cmd: list[str], error_message: str) -> None:
-        run_cmd(cmd, error_message, PipelineError)
+    def _run_cmd(
+        self, cmd: list[str], error_message: str, *, job_id: int | None = None
+    ) -> None:
+        if job_id is None:
+            run_cmd(cmd, error_message, PipelineError)
+            return
+
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                try:
+                    self._raise_if_canceled(job_id)
+                except JobCanceled:
+                    process.terminate()
+                    try:
+                        process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate(timeout=5)
+                    raise
+        if process.returncode != 0:
+            details = stderr.strip() or stdout.strip()
+            raise PipelineError(f"{error_message}: {details}")
+
+    def _raise_if_canceled(self, job_id: int) -> None:
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if job and job.status == JobStatus.CANCELED:
+                raise JobCanceled()
 
     def _upsert_provider_request(
         self, session: Session, job_id: int, provider_request_id: str
@@ -1325,6 +1383,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         *,
         status: JobStatus = JobStatus.PROCESSING,
     ) -> None:
+        if job.status == JobStatus.CANCELED:
+            raise JobCanceled()
         job.status = status
         job.current_step = step
         job.progress_percent = max(job.progress_percent, progress)
@@ -1340,6 +1400,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job:
                 return
+            if job.status == JobStatus.CANCELED:
+                return
             job.status = JobStatus.FAILED
             job.error_code = error_code
             job.error_message = error_message[:1024]
@@ -1347,6 +1409,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             session.add(job)
             session.commit()
             job_update_broker.notify(job.id, "job_failed")
+
+    def _mark_job_canceled(self, job_id: int) -> None:
+        with Session(engine) as session:
+            job = session.exec(select(Job).where(Job.id == job_id)).first()
+            if not job:
+                return
+            job.status = JobStatus.CANCELED
+            job.current_step = "canceled"
+            job.updated_at = datetime.now(timezone.utc)
+            job.error_code = None
+            job.error_message = None
+            session.add(job)
+            session.commit()
+            job_update_broker.notify(job.id, "job_canceled")
 
     def _seconds_to_srt_time(self, seconds: float) -> str:
         safe_seconds = max(0.0, float(seconds))
