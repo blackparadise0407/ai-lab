@@ -289,3 +289,85 @@ def test_delete_job_removes_artifacts_provider_requests_and_local_files(tmp_path
             ).all()
             == []
         )
+
+
+def test_cancel_in_progress_job_marks_canceled(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        job = Job(
+            external_job_id="processing_cancel",
+            status=JobStatus.PROCESSING,
+            current_step="transcribing_source",
+            progress_percent=25,
+            error_code="old_error",
+            error_message="old message",
+        )
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        job_id = job.id
+
+    notifications: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        "app.api.routes.jobs.job_update_broker.notify",
+        lambda job_id, event_type: notifications.append((job_id, event_type)),
+    )
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(f"/v1/jobs/{job_id}/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "canceled"
+    assert payload["current_step"] == "canceled"
+    assert payload["progress_percent"] == 25
+    assert payload["error_code"] is None
+    assert payload["error_message"] is None
+    assert notifications == [(job_id, "job_canceled")]
+
+
+def test_cancel_rejects_completed_job() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        job = Job(external_job_id="completed_cancel", status=JobStatus.COMPLETED)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        job_id = job.id
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(f"/v1/jobs/{job_id}/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert (
+        response.json()["detail"]
+        == "Only queued or in-progress jobs can be canceled"
+    )

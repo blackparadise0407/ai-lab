@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Ban,
   Download,
   ExternalLink,
   Eye,
@@ -27,6 +28,7 @@ import type {
 } from "../../interfaces/job";
 import {
   apiBaseUrl,
+  cancelJob,
   createVideoCollection,
   deleteJob,
   getArtifactDownloadUrl,
@@ -80,6 +82,14 @@ const statusOrder: Job["status"][] = [
   "finalizing",
   "completed",
 ];
+
+const cancelableStatuses = new Set<Job["status"]>([
+  "created",
+  "uploaded",
+  "processing",
+  "waiting_provider",
+  "finalizing",
+]);
 
 const defaultVoiceValue = "__provider_default__";
 
@@ -290,6 +300,19 @@ export default function DashboardPage() {
     },
   });
 
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: number) => cancelJob(jobId),
+    onSuccess: async (canceledJob) => {
+      setFormError(null);
+      queryClient.setQueryData(["job", canceledJob.id], canceledJob);
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+      await refreshDashboard(canceledJob.id);
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to cancel this job."));
+    },
+  });
+
   const deleteJobMutation = useMutation({
     mutationFn: (jobId: number) => deleteJob(jobId),
     onSuccess: async (_, deletedJobId) => {
@@ -368,6 +391,17 @@ export default function DashboardPage() {
   function handleRetryJob() {
     if (!job || job.status !== "failed") return;
     retryJobMutation.mutate(job.id);
+  }
+
+  function handleCancelJob() {
+    if (!job || !cancelableStatuses.has(job.status)) return;
+    if (
+      window.confirm(
+        "Cancel this job? Partial intermediate artifacts may remain available for retry diagnostics.",
+      )
+    ) {
+      cancelJobMutation.mutate(job.id);
+    }
   }
 
   function handleDeleteJob() {
@@ -681,6 +715,21 @@ export default function DashboardPage() {
                     className={cn(retryJobMutation.isPending && "animate-spin")}
                   />
                   {retryJobMutation.isPending ? "Retrying…" : "Retry failed job"}
+                </Button>
+              )}
+              {job && cancelableStatuses.has(job.status) && (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={handleCancelJob}
+                  disabled={cancelJobMutation.isPending}
+                >
+                  {cancelJobMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Ban />
+                  )}
+                  {cancelJobMutation.isPending ? "Canceling…" : "Cancel job"}
                 </Button>
               )}
               {job?.status === "completed" && (

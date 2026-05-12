@@ -163,3 +163,33 @@ def test_retry_from_muxing_reuses_existing_intermediate_files(
     assert artifacts[ASS_ARTIFACT_TYPE].storage_url == str(ass_subtitle)
     assert artifacts[SRT_ARTIFACT_TYPE].storage_url == str(job_work_dir / "source.srt")
     assert artifacts[TTS_AUDIO_ARTIFACT_TYPE].storage_url == str(dubbed_audio)
+
+
+def test_run_cmd_stops_when_job_is_canceled(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        job = Job(external_job_id="cancel_running", status=JobStatus.CANCELED)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        job_id = job.id
+
+    worker = VideoProcessingWorker()
+    monkeypatch.setattr(video_processor, "engine", engine)
+
+    try:
+        worker._run_cmd(
+            ["python", "-c", "import time; time.sleep(30)"],
+            "sleep failed",
+            job_id=job_id,
+        )
+    except video_processor.JobCanceled:
+        pass
+    else:  # pragma: no cover - defensive assertion for cancellation behavior
+        raise AssertionError("expected JobCanceled")

@@ -41,6 +41,8 @@ def refresh_collection_rollup(session: Session, collection: VideoCollection) -> 
             next_status = JobStatus.COMPLETED
         elif any(status == JobStatus.FAILED for status in job_statuses):
             next_status = JobStatus.FAILED
+        elif any(status == JobStatus.CANCELED for status in job_statuses):
+            next_status = JobStatus.CANCELED
         elif any(status in (JobStatus.PROCESSING, JobStatus.WAITING_PROVIDER, JobStatus.FINALIZING) for status in job_statuses):
             next_status = JobStatus.PROCESSING
         elif any(status == JobStatus.UPLOADED for status in job_statuses):

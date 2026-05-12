@@ -91,6 +91,13 @@ export async function retryJob(jobId: number) {
   return parseJsonResponse<Job>(response);
 }
 
+export async function cancelJob(jobId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}/cancel`, {
+    method: 'POST',
+  });
+  return parseJsonResponse<Job>(response);
+}
+
 export async function getJobs(
   filters: { status?: Job['status']; limit?: number; offset?: number } = {},
 ) {
