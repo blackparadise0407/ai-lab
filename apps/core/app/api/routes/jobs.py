@@ -234,19 +234,33 @@ def delete_job(job_id: int, session: Session = Depends(get_session)):
     "",
     response_model=JobListResponse,
     summary="List jobs",
-    description="Lists a paginated set of jobs, optionally filtered by status. Completed jobs power the videos dashboard draft.",
+    description="Lists a paginated set of jobs sorted by created time, with optional status, language, and current-step filters.",
 )
 def list_jobs(
     status: JobStatus | None = None,
+    source_language: str | None = None,
+    target_language: str | None = None,
+    current_step: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ):
     count_statement = select(func.count(Job.id))
-    statement = select(Job).order_by(Job.updated_at.desc()).offset(offset).limit(limit)
+    statement = select(Job).order_by(Job.created_at.desc()).offset(offset).limit(limit)
+
+    filters = []
     if status is not None:
-        count_statement = count_statement.where(Job.status == status)
-        statement = statement.where(Job.status == status)
+        filters.append(Job.status == status)
+    if source_language:
+        filters.append(Job.source_language == source_language)
+    if target_language:
+        filters.append(Job.target_language == target_language)
+    if current_step:
+        filters.append(Job.current_step == current_step)
+
+    for filter_clause in filters:
+        count_statement = count_statement.where(filter_clause)
+        statement = statement.where(filter_clause)
 
     total = session.exec(count_statement).one()
     items = list(session.exec(statement).all())
