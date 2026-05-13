@@ -91,12 +91,35 @@ export async function retryJob(jobId: number) {
   return parseJsonResponse<Job>(response);
 }
 
+export async function cancelJob(jobId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}/cancel`, {
+    method: 'POST',
+  });
+  return parseJsonResponse<Job>(response);
+}
+
 export async function getJobs(
-  filters: { status?: Job['status']; limit?: number; offset?: number } = {},
+  filters: {
+    status?: Job['status'];
+    sourceLanguage?: string;
+    targetLanguage?: string;
+    currentStep?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ) {
   const searchParams = new URLSearchParams();
   if (filters.status) {
     searchParams.set('status', filters.status);
+  }
+  if (filters.sourceLanguage) {
+    searchParams.set('source_language', filters.sourceLanguage);
+  }
+  if (filters.targetLanguage) {
+    searchParams.set('target_language', filters.targetLanguage);
+  }
+  if (filters.currentStep) {
+    searchParams.set('current_step', filters.currentStep);
   }
   if (filters.limit !== undefined) {
     searchParams.set('limit', String(filters.limit));
@@ -239,5 +262,5 @@ export function getArtifactPreviewUrl(artifact: Artifact) {
     return artifact.storage_url;
   }
 
-  return `${getArtifactDownloadUrl(artifact)}?disposition=inline`;
+  return `${apiBaseUrl}/v1/artifacts/${artifact.id}/preview`;
 }

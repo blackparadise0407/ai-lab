@@ -1,9 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Download,
-  ExternalLink,
+  Ban,
   Loader2,
   Plug,
   PlugZap,
@@ -19,17 +18,14 @@ import { formatDate, getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
 import { cn } from "../../lib/utils";
 import type {
-  Artifact,
   Job,
   JobEventPayload,
-  ProviderRequest,
 } from "../../interfaces/job";
 import {
   apiBaseUrl,
+  cancelJob,
   createVideoCollection,
   deleteJob,
-  getArtifactDownloadUrl,
-  getArtifactPreviewUrl,
   getArtifacts,
   getDubProviderVoices,
   getJob,
@@ -38,7 +34,6 @@ import {
   uploadVideoCollectionSource,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
-import { EmptyState } from "../common/EmptyState";
 import { Badge } from "../ui/badge";
 import { Button, buttonVariants } from "../ui/button";
 import {
@@ -51,7 +46,6 @@ import {
 } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Progress } from "../ui/progress";
 import {
   Select,
   SelectContent,
@@ -59,26 +53,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-
-const statusLabels: Record<Job["status"], string> = {
-  created: "Created",
-  uploaded: "Uploaded",
-  processing: "Processing",
-  waiting_provider: "Waiting provider",
-  finalizing: "Finalizing",
-  completed: "Completed",
-  failed: "Failed",
-  canceled: "Canceled",
-};
-
-const statusOrder: Job["status"][] = [
-  "created",
-  "uploaded",
-  "processing",
-  "waiting_provider",
-  "finalizing",
-  "completed",
-];
+import {
+  ArtifactRow,
+  cancelableStatuses,
+  DataPanel,
+  JobStatusCard,
+  ProviderRequestRow,
+} from "./job-detail-ui";
 
 const defaultVoiceValue = "__provider_default__";
 
@@ -289,6 +270,19 @@ export default function DashboardPage() {
     },
   });
 
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: number) => cancelJob(jobId),
+    onSuccess: async (canceledJob) => {
+      setFormError(null);
+      queryClient.setQueryData(["job", canceledJob.id], canceledJob);
+      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
+      await refreshDashboard(canceledJob.id);
+    },
+    onError: (error) => {
+      setFormError(getErrorMessage(error, "Unable to cancel this job."));
+    },
+  });
+
   const deleteJobMutation = useMutation({
     mutationFn: (jobId: number) => deleteJob(jobId),
     onSuccess: async (_, deletedJobId) => {
@@ -331,11 +325,6 @@ export default function DashboardPage() {
 
   useErrorToast(error, "Dashboard error");
 
-  const activeStepIndex = useMemo(() => {
-    if (!job) return -1;
-    return statusOrder.indexOf(job.status);
-  }, [job]);
-
   async function refreshDashboard(jobId = selectedJobId) {
     if (!jobId) return;
 
@@ -367,6 +356,17 @@ export default function DashboardPage() {
   function handleRetryJob() {
     if (!job || job.status !== "failed") return;
     retryJobMutation.mutate(job.id);
+  }
+
+  function handleCancelJob() {
+    if (!job || !cancelableStatuses.has(job.status)) return;
+    if (
+      window.confirm(
+        "Cancel this job? Partial intermediate artifacts may remain available for retry diagnostics.",
+      )
+    ) {
+      cancelJobMutation.mutate(job.id);
+    }
   }
 
   function handleDeleteJob() {
@@ -682,6 +682,21 @@ export default function DashboardPage() {
                   {retryJobMutation.isPending ? "Retrying…" : "Retry failed job"}
                 </Button>
               )}
+              {job && cancelableStatuses.has(job.status) && (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={handleCancelJob}
+                  disabled={cancelJobMutation.isPending}
+                >
+                  {cancelJobMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Ban />
+                  )}
+                  {cancelJobMutation.isPending ? "Canceling…" : "Cancel job"}
+                </Button>
+              )}
               {job?.status === "completed" && (
                 <Link
                   className={buttonVariants({
@@ -713,94 +728,7 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
-        <CardHeader>
-          <div>
-            <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
-              Pipeline status
-            </CardDescription>
-            <CardTitle className="mt-2 text-2xl">
-              {job
-                ? `Job #${job.id} · ${job.external_job_id}`
-                : "No job loaded"}
-            </CardTitle>
-          </div>
-          <CardAction>
-            {job && (
-              <StatusBadge status={job.status}>
-                {statusLabels[job.status]}
-              </StatusBadge>
-            )}
-          </CardAction>
-        </CardHeader>
-
-        <CardContent>
-          {job ? (
-            <div className="grid gap-5">
-              <Progress
-                value={job.progress_percent}
-                aria-label={`Progress ${job.progress_percent}%`}
-                className="h-4"
-              />
-              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                <Badge variant="secondary">
-                  {job.source_language.toUpperCase()} →{" "}
-                  {job.target_language.toUpperCase()}
-                </Badge>
-                {job.translation_context && (
-                  <Badge variant="secondary">
-                    Context {job.translation_context}
-                  </Badge>
-                )}
-                <Badge variant="secondary">
-                  Voice {job.voice_id || "provider default"}
-                </Badge>
-                <Badge variant="secondary">
-                  Speed {job.output_video_speed}x
-                </Badge>
-                <Badge variant="secondary">
-                  Original volume {job.original_audio_volume}
-                </Badge>
-                <Badge variant="secondary">
-                  {job.progress_percent}% complete
-                </Badge>
-                <Badge variant="secondary">
-                  Updated {formatDate(job.updated_at)}
-                </Badge>
-                <Badge variant="secondary">
-                  {job.current_step ?? "Waiting for next step"}
-                </Badge>
-                {job.error_message && (
-                  <Badge className="bg-red-100 text-red-700">
-                    Error {job.error_message}
-                  </Badge>
-                )}
-              </div>
-              <ol className="grid gap-3 lg:grid-cols-6">
-                {statusOrder.map((status, index) => (
-                  <li
-                    key={status}
-                    className={cn(
-                      "flex items-center gap-3 rounded-xl border bg-slate-50 p-3 text-sm font-bold text-muted-foreground",
-                      index <= activeStepIndex &&
-                        "border-primary/20 bg-primary/10 text-primary",
-                    )}
-                  >
-                    <span className="flex size-7 items-center justify-center rounded-full bg-white text-xs shadow-sm">
-                      {index + 1}
-                    </span>
-                    {statusLabels[status]}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : (
-            <EmptyState>
-              Create a job or load an existing one to see pipeline telemetry.
-            </EmptyState>
-          )}
-        </CardContent>
-      </Card>
+      <JobStatusCard job={job} />
 
       <section className="grid gap-6 lg:grid-cols-2">
         <DataPanel
@@ -824,107 +752,5 @@ export default function DashboardPage() {
         </DataPanel>
       </section>
     </>
-  );
-}
-
-function StatusBadge({
-  status,
-  children,
-}: {
-  status: Job["status"];
-  children: React.ReactNode;
-}) {
-  const className = {
-    created: "bg-blue-100 text-blue-700",
-    uploaded: "bg-blue-100 text-blue-700",
-    processing: "bg-amber-100 text-amber-800",
-    waiting_provider: "bg-amber-100 text-amber-800",
-    finalizing: "bg-amber-100 text-amber-800",
-    completed: "bg-emerald-100 text-emerald-700",
-    failed: "bg-red-100 text-red-700",
-    canceled: "bg-red-100 text-red-700",
-  }[status];
-
-  return <Badge className={cn("uppercase", className)}>{children}</Badge>;
-}
-
-function DataPanel({
-  title,
-  count,
-  emptyLabel,
-  children,
-}: {
-  title: string;
-  count: number;
-  emptyLabel: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="max-h-[34rem] min-h-72 bg-white/90 shadow-xl shadow-slate-900/5">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardAction>
-          <Badge variant="secondary">{count}</Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="min-h-0 flex-1 overflow-y-auto pr-4">
-        {count > 0 ? (
-          <div className="grid gap-3">{children}</div>
-        ) : (
-          <EmptyState>{emptyLabel}</EmptyState>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ArtifactRow({ artifact }: { artifact: Artifact }) {
-  return (
-    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
-      <div>
-        <strong>{artifact.artifact_type}</strong>
-        <p className="mt-1 break-all text-sm text-muted-foreground">
-          {artifact.content_type ?? "Unknown content type"}
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <a
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-          href={getArtifactDownloadUrl(artifact)}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <ExternalLink />
-          Open
-        </a>
-        <a
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-          href={getArtifactDownloadUrl(artifact)}
-          download
-        >
-          <Download />
-          Download
-        </a>
-      </div>
-    </article>
-  );
-}
-
-function ProviderRequestRow({ request }: { request: ProviderRequest }) {
-  return (
-    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
-      <div>
-        <strong>{request.provider_name}</strong>
-        <p className="mt-1 break-all text-sm text-muted-foreground">
-          {request.provider_request_id}
-        </p>
-        {request.last_error && (
-          <p className="mt-1 break-all text-sm font-medium text-destructive">
-            {request.last_error}
-          </p>
-        )}
-      </div>
-      <Badge variant="secondary">{request.status}</Badge>
-    </article>
   );
 }

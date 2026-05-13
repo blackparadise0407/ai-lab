@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -23,6 +24,27 @@ router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
 UPLOADS_DIR = Path("uploads/source_videos")
 SOURCE_VIDEO_ARTIFACT_TYPE = "source_video"
+
+
+CANCELABLE_JOB_STATUSES = {
+    JobStatus.CREATED,
+    JobStatus.UPLOADED,
+    JobStatus.PROCESSING,
+    JobStatus.WAITING_PROVIDER,
+    JobStatus.FINALIZING,
+}
+
+
+def _refresh_job_collection_rollup(session: Session, job_id: int) -> None:
+    video_segment = session.exec(
+        select(VideoSegment).where(VideoSegment.job_id == job_id)
+    ).first()
+    if not video_segment:
+        return
+
+    collection = session.get(VideoCollection, video_segment.collection_id)
+    if collection:
+        refresh_collection_rollup(session, collection)
 
 
 @router.post(
@@ -159,6 +181,40 @@ def retry_job(job_id: int, session: Session = Depends(get_session)):
     return job
 
 
+@router.post(
+    "/{job_id}/cancel",
+    response_model=JobResponse,
+    summary="Cancel job",
+    description="Marks a queued or in-progress job as canceled. The worker stops at the next cancellation checkpoint.",
+)
+def cancel_job(job_id: int, session: Session = Depends(get_session)):
+    job = session.exec(select(Job).where(Job.id == job_id)).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status == JobStatus.CANCELED:
+        return job
+
+    if job.status not in CANCELABLE_JOB_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Only queued or in-progress jobs can be canceled",
+        )
+
+    job.status = JobStatus.CANCELED
+    job.current_step = "canceled"
+    job.updated_at = datetime.now(timezone.utc)
+    job.error_code = None
+    job.error_message = None
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    _refresh_job_collection_rollup(session, job.id)
+    job_update_broker.notify(job.id, "job_canceled")
+    return job
+
+
 @router.delete(
     "/{job_id}",
     status_code=204,
@@ -178,19 +234,33 @@ def delete_job(job_id: int, session: Session = Depends(get_session)):
     "",
     response_model=JobListResponse,
     summary="List jobs",
-    description="Lists a paginated set of jobs, optionally filtered by status. Completed jobs power the videos dashboard draft.",
+    description="Lists a paginated set of jobs sorted by created time, with optional status, language, and current-step filters.",
 )
 def list_jobs(
     status: JobStatus | None = None,
+    source_language: str | None = None,
+    target_language: str | None = None,
+    current_step: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ):
     count_statement = select(func.count(Job.id))
-    statement = select(Job).order_by(Job.updated_at.desc()).offset(offset).limit(limit)
+    statement = select(Job).order_by(Job.created_at.desc()).offset(offset).limit(limit)
+
+    filters = []
     if status is not None:
-        count_statement = count_statement.where(Job.status == status)
-        statement = statement.where(Job.status == status)
+        filters.append(Job.status == status)
+    if source_language:
+        filters.append(Job.source_language == source_language)
+    if target_language:
+        filters.append(Job.target_language == target_language)
+    if current_step:
+        filters.append(Job.current_step == current_step)
+
+    for filter_clause in filters:
+        count_statement = count_statement.where(filter_clause)
+        statement = statement.where(filter_clause)
 
     total = session.exec(count_statement).one()
     items = list(session.exec(statement).all())
