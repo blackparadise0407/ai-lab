@@ -811,55 +811,66 @@ class VideoProcessingWorker:
 
         system_text = (
             "### Persona\n"
-            "You are a professional Subtitle Translator and Dubbing Script Editor "
-            "specializing in isochronous dubbing.\n\n"
+            f"You are a professional Dubbing Script Writer specializing in natural, "
+            f"broadcast-quality {target_language} translations for video dubbing.\n\n"
 
-            "### Task Instructions\n"
-            f"Translate the `text` field of each provided JSON object into {target_language}. "
-            "Read the entire ordered cue list as one continuous dubbing script so you can maintain "
-            "sentence flow, tone, and natural punctuation across cue boundaries. "
-            "Use `break_after_seconds` to understand how much silence follows each cue, "
-            "and add appropriate commas or periods so the full script reads with natural pauses.\n\n"
+            "### Task\n"
+            f"Read the full source cue list as one continuous piece of content, then write "
+            f"a fluent, idiomatic {target_language} dubbing script — exactly as a native speaker "
+            "would naturally say it. Prioritise naturalness, proper grammar, correct punctuation, "
+            "and consistent tone throughout the entire script.\n\n"
 
             f"{context_instruction}"
 
-            "### Strict Rules (Priority Order)\n"
+            "### Output Format\n"
+            "Return ONLY a valid JSON object — no markdown fences, no extra text. "
+            "The object must have these exact keys:\n"
+            '- "target_language": BCP-47 language tag string\n'
+            '- "style_notes": brief string describing tone/register decisions\n'
+            '- "script": the complete translated script as one naturally flowing string\n'
+            '- "chunks": array of chunk objects, each with:\n'
+            '    - "text": one natural sentence or clause in the target language\n'
+            '    - "source_start": number — start time (seconds) of the source material this chunk covers\n'
+            '    - "source_end": number — end time (seconds)\n'
+            '- "glossary": array of {"source": ..., "target": ...} term pairs (may be empty)\n\n'
 
-            "1. **Output Format:** Return ONLY a raw JSON array of strings "
-            '(e.g., ["Translated text 1", "Translated text 2"]). '
-            "Do not use markdown code blocks, introductory text, concluding text, or extra JSON keys.\n\n"
-
-            "2. **Dubbing Constraint — Timing Is King:**\n"
-            "   - **Hard Constraint:** Each translation must be speakable at a natural, "
-            "conversational pace within its `duration_seconds`.\n"
-            "   - **Rate heuristic:** Target ~3-4 words per second. "
-            "For example, a 2-second cue should contain no more than 6-8 words.\n"
-            "   - **Priority:** Timing and brevity > literal accuracy.\n"
-            "   - If a literal translation is too long, use shorter synonyms, compress phrasing, "
-            "or omit non-essential filler words. The line must fit without forcing "
-            "the voice actor to speak unnaturally fast.\n\n"
-
-            "3. **Strict 1:1 Mapping:** The output array must contain EXACTLY the same number of "
-            "elements as the input array. "
-            "Merging two cues into one string is FORBIDDEN. "
-            "Splitting one cue into two is FORBIDDEN. "
-            "If a cue is very short or a sentence fragment, translate it as a fragment — "
-            "do not combine it with adjacent cues. "
-            f"If a cue is already in {target_language} or contains no translatable text, "
-            "copy the original string verbatim.\n\n"
-
-            "4. **Sentence Continuity:** When a sentence spans multiple cues, maintain grammatical "
-            "and tonal flow across the breaks — but if achieving flow would violate a cue's "
-            "`duration_seconds`, timing wins. It is acceptable to leave a fragment "
-            "incomplete mid-sentence if the timing requires it.\n\n"
-
-            "5. **Non-Speech Elements:** Copy all bracketed tags (e.g., [music], [laughter]) "
-            "and speaker labels (e.g., MAN:) verbatim, unchanged, and in their original position "
-            "within the string. Do not translate, reformat, or relocate them.\n\n"
-
-            f"6. **Naturalness:** Use idiomatic, spoken-style {target_language}. "
-            "Ensure pronouns and levels of formality are consistent throughout the batch.\n"
+            "### Chunking Rules\n"
+            "1. **Write the full script first**, then divide it into chunks at natural sentence "
+            "and clause boundaries — not necessarily at the same positions as the source cues.\n"
+            "2. **Merge short source cues** that form a single sentence into one chunk whose "
+            "`source_start`/`source_end` span all those cues.\n"
+            "3. **Split long source cues** that contain multiple sentences into separate chunks, "
+            "each with `source_start`/`source_end` interpolated within the cue's time window.\n"
+            "4. Each chunk must be comfortably speakable at a natural pace within its time window "
+            "(≈3–4 words per second). If a faithful translation is too long, use shorter synonyms "
+            "or compress phrasing — but never sacrifice grammatical completeness mid-sentence.\n"
+            "5. Preserve [bracketed non-speech tags] and speaker labels (e.g. MAN:) verbatim "
+            "at their natural position within the surrounding text.\n"
+            f"6. Use idiomatic, spoken-style {target_language} throughout. "
+            "Keep pronouns and formality level consistent.\n"
         )
+
+        # Build a clean cue list: only the fields the LLM needs
+        segments = self._get_transcript_segments(source_transcript)
+        cues: list[dict[str, object]] = []
+        for i, seg in enumerate(segments):
+            start = self._coerce_seconds(seg.get("start"), default=0.0)
+            end = self._coerce_seconds(seg.get("end"), default=start + 0.1)
+            next_seg = segments[i + 1] if i + 1 < len(segments) else None
+            next_start = self._coerce_seconds(
+                next_seg.get("start") if next_seg else None, default=end
+            )
+            cues.append(
+                {
+                    "index": i,
+                    "text": str(seg.get("text") or "").strip(),
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "duration_seconds": round(end - start, 3),
+                    "break_after_seconds": round(max(0.0, next_start - end), 3),
+                }
+            )
+
         payload = {
             "model": model,
             "input": [
@@ -872,7 +883,7 @@ class VideoProcessingWorker:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": json.dumps(source_transcript, ensure_ascii=False),
+                            "text": json.dumps(cues, ensure_ascii=False),
                         }
                     ],
                 },
