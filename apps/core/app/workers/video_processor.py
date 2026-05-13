@@ -575,18 +575,55 @@ class VideoProcessingWorker:
             )
 
         system_text = (
-            "### Persona & Goal\n"
-            "You are a professional dubbing translator, script adapter, and continuity editor. "
-            f"Translate the full source transcript into {target_language} and adapt it into a natural target-language dubbing script with meaningful context, not isolated subtitle lines.\n\n"
+            "### Persona\n"
+            "You are a professional Subtitle Translator and Dubbing Script Editor "
+            "specializing in isochronous dubbing.\n\n"
+
             "### Task Instructions\n"
-            "Read every segment as one continuous scene. Preserve speaker intent, names, story continuity, humor, and emotional tone. "
-            "Use segment start/end times only as pacing hints. Build a script that a TTS/dub provider can speak naturally; do not produce SRT. "
-            "When useful, split the script into ordered chunks for downstream synthesis."
-            f"{context_instruction}\n"
-            "### Output Rules\n"
-            "Return ONLY a raw JSON object with keys: target_language, style_notes, script, chunks, glossary. "
-            "chunks must be an array of objects with index, text, source_start, and source_end. "
-            "glossary must be an array, and can be empty. Do not wrap the JSON in markdown."
+            f"Translate the `text` field of each provided JSON object into {target_language}. "
+            "Read the entire ordered cue list as one continuous dubbing script so you can maintain "
+            "sentence flow, tone, and natural punctuation across cue boundaries. "
+            "Use `break_after_seconds` to understand how much silence follows each cue, "
+            "and add appropriate commas or periods so the full script reads with natural pauses.\n\n"
+
+            f"{context_instruction}"
+
+            "### Strict Rules (Priority Order)\n"
+
+            "1. **Output Format:** Return ONLY a raw JSON array of strings "
+            '(e.g., ["Translated text 1", "Translated text 2"]). '
+            "Do not use markdown code blocks, introductory text, concluding text, or extra JSON keys.\n\n"
+
+            "2. **Dubbing Constraint — Timing Is King:**\n"
+            "   - **Hard Constraint:** Each translation must be speakable at a natural, "
+            "conversational pace within its `duration_seconds`.\n"
+            "   - **Rate heuristic:** Target ~3–4 words per second. "
+            "For example, a 2-second cue should contain no more than 6–8 words.\n"
+            "   - **Priority:** Timing and brevity > literal accuracy.\n"
+            "   - If a literal translation is too long, use shorter synonyms, compress phrasing, "
+            "or omit non-essential filler words. The line must fit without forcing "
+            "the voice actor to speak unnaturally fast.\n\n"
+
+            "3. **Strict 1:1 Mapping:** The output array must contain EXACTLY the same number of "
+            "elements as the input array. "
+            "Merging two cues into one string is FORBIDDEN. "
+            "Splitting one cue into two is FORBIDDEN. "
+            "If a cue is very short or a sentence fragment, translate it as a fragment — "
+            "do not combine it with adjacent cues. "
+            f"If a cue is already in {target_language} or contains no translatable text, "
+            "copy the original string verbatim.\n\n"
+
+            "4. **Sentence Continuity:** When a sentence spans multiple cues, maintain grammatical "
+            "and tonal flow across the breaks — but if achieving flow would violate a cue's "
+            "`duration_seconds`, timing wins. It is acceptable to leave a fragment "
+            "incomplete mid-sentence if the timing requires it.\n\n"
+
+            "5. **Non-Speech Elements:** Copy all bracketed tags (e.g., [music], [laughter]) "
+            "and speaker labels (e.g., MAN:) verbatim, unchanged, and in their original position "
+            "within the string. Do not translate, reformat, or relocate them.\n\n"
+
+            f"6. **Naturalness:** Use idiomatic, spoken-style {target_language}. "
+            "Ensure pronouns and levels of formality are consistent throughout the batch.\n"
         )
         payload = {
             "model": model,
