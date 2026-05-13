@@ -1,44 +1,27 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Ban,
-  Loader2,
-  Plug,
-  PlugZap,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { Loader2, Plug, PlugZap } from "lucide-react";
 
 import {
   DEFAULT_TARGET_LANGUAGE_CODE,
   targetLanguages,
 } from "../../constants/languages";
-import { formatDate, getErrorMessage } from "../../lib/format";
+import { getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
-import { cn } from "../../lib/utils";
-import type {
-  Job,
-  JobEventPayload,
-} from "../../interfaces/job";
+import type { Job, JobEventPayload } from "../../interfaces/job";
 import {
   apiBaseUrl,
-  cancelJob,
   createVideoCollection,
-  deleteJob,
-  getArtifacts,
   getDubProviderVoices,
   getJob,
-  getProviderRequests,
-  retryJob,
+  getJobs,
   uploadVideoCollectionSource,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
 import { Badge } from "../ui/badge";
-import { Button, buttonVariants } from "../ui/button";
+import { Button } from "../ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -53,39 +36,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import {
-  ArtifactRow,
-  cancelableStatuses,
-  DataPanel,
-  JobStatusCard,
-  ProviderRequestRow,
-} from "./job-detail-ui";
+import { JobStatusCard } from "./job-detail-ui";
 
 const defaultVoiceValue = "__provider_default__";
 
-function getJobIdFromUrl() {
-  const rawJobId = new URLSearchParams(window.location.search).get("jobId");
-  if (!rawJobId) return null;
-
-  const parsedJobId = Number(rawJobId);
-  return Number.isInteger(parsedJobId) && parsedJobId > 0 ? parsedJobId : null;
-}
-
-function setJobIdInUrl(jobId: number | null) {
-  const url = new URL(window.location.href);
-
-  if (jobId === null) {
-    url.searchParams.delete("jobId");
-  } else {
-    url.searchParams.set("jobId", String(jobId));
-  }
-
-  window.history.replaceState(
-    null,
-    "",
-    `${url.pathname}${url.search}${url.hash}`,
-  );
-}
+const runningJobStatuses = new Set<Job["status"]>([
+  "created",
+  "uploaded",
+  "processing",
+  "waiting_provider",
+  "finalizing",
+]);
 
 export default function DashboardPage() {
   const [sourceLanguage, setSourceLanguage] = useState("zh");
@@ -97,13 +58,7 @@ export default function DashboardPage() {
   const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
   const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
   const [file, setFile] = useState<File | null>(null);
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(() =>
-    getJobIdFromUrl(),
-  );
-  const [jobIdInput, setJobIdInput] = useState(() => {
-    const initialJobId = getJobIdFromUrl();
-    return initialJobId === null ? "" : String(initialJobId);
-  });
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [socketStatus, setSocketStatus] = useState<
     "idle" | "connected" | "disconnected" | "error"
@@ -116,16 +71,10 @@ export default function DashboardPage() {
     enabled: selectedJobId !== null,
   });
 
-  const artifactsQuery = useQuery({
-    queryKey: ["artifacts", selectedJobId],
-    queryFn: () => getArtifacts(selectedJobId!),
-    enabled: selectedJobId !== null,
-  });
-
-  const providerRequestsQuery = useQuery({
-    queryKey: ["provider-requests", selectedJobId],
-    queryFn: () => getProviderRequests(selectedJobId!),
-    enabled: selectedJobId !== null,
+  const activeJobsQuery = useQuery({
+    queryKey: ["jobs", "running"],
+    queryFn: () => getJobs({ limit: 20 }),
+    refetchInterval: 5000,
   });
 
   const voicesQuery = useQuery({
@@ -133,21 +82,6 @@ export default function DashboardPage() {
     queryFn: () => getDubProviderVoices(false, targetLanguage),
     staleTime: 24 * 60 * 60 * 1000,
   });
-
-  useEffect(() => {
-    setJobIdInUrl(selectedJobId);
-  }, [selectedJobId]);
-
-  useEffect(() => {
-    function handlePopState() {
-      const jobIdFromUrl = getJobIdFromUrl();
-      setSelectedJobId(jobIdFromUrl);
-      setJobIdInput(jobIdFromUrl === null ? "" : String(jobIdFromUrl));
-    }
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
 
   useEffect(() => {
     if (selectedJobId === null) {
@@ -163,18 +97,7 @@ export default function DashboardPage() {
         if (payload.job) {
           queryClient.setQueryData(["job", selectedJobId], payload.job);
         }
-        if (payload.artifacts) {
-          queryClient.setQueryData(
-            ["artifacts", selectedJobId],
-            payload.artifacts,
-          );
-        }
-        if (payload.provider_requests) {
-          queryClient.setQueryData(
-            ["provider-requests", selectedJobId],
-            payload.provider_requests,
-          );
-        }
+        void queryClient.invalidateQueries({ queryKey: ["jobs", "running"] });
       },
     });
   }, [queryClient, selectedJobId]);
@@ -242,7 +165,6 @@ export default function DashboardPage() {
       }
       setFormError(null);
       setSelectedJobId(uploaded.id);
-      setJobIdInput(String(uploaded.id));
       queryClient.setQueryData(["job", uploaded.id], uploaded);
       await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
       await refreshDashboard(uploaded.id);
@@ -257,66 +179,32 @@ export default function DashboardPage() {
     },
   });
 
-  const retryJobMutation = useMutation({
-    mutationFn: (jobId: number) => retryJob(jobId),
-    onSuccess: async (retriedJob) => {
-      setFormError(null);
-      queryClient.setQueryData(["job", retriedJob.id], retriedJob);
-      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
-      await refreshDashboard(retriedJob.id);
-    },
-    onError: (error) => {
-      setFormError(getErrorMessage(error, "Unable to retry this job."));
-    },
-  });
-
-  const cancelJobMutation = useMutation({
-    mutationFn: (jobId: number) => cancelJob(jobId),
-    onSuccess: async (canceledJob) => {
-      setFormError(null);
-      queryClient.setQueryData(["job", canceledJob.id], canceledJob);
-      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
-      await refreshDashboard(canceledJob.id);
-    },
-    onError: (error) => {
-      setFormError(getErrorMessage(error, "Unable to cancel this job."));
-    },
-  });
-
-  const deleteJobMutation = useMutation({
-    mutationFn: (jobId: number) => deleteJob(jobId),
-    onSuccess: async (_, deletedJobId) => {
-      setFormError(null);
-      setSelectedJobId(null);
-      setJobIdInput("");
-      queryClient.removeQueries({ queryKey: ["job", deletedJobId] });
-      queryClient.removeQueries({ queryKey: ["artifacts", deletedJobId] });
-      queryClient.removeQueries({
-        queryKey: ["provider-requests", deletedJobId],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["video-collections"] });
-    },
-    onError: (error) => {
-      setFormError(getErrorMessage(error, "Unable to delete this job."));
-    },
-  });
-
-  const job = jobQuery.data ?? null;
-  const artifacts = artifactsQuery.data ?? [];
-  const providerRequests = providerRequestsQuery.data ?? [];
+  const selectedJob = jobQuery.data ?? null;
+  const activeBackgroundJob = useMemo(() => {
+    const activeJobs = activeJobsQuery.data?.items ?? [];
+    return (
+      activeJobs.find((item) => runningJobStatuses.has(item.status)) ?? null
+    );
+  }, [activeJobsQuery.data?.items]);
+  const job =
+    selectedJob && runningJobStatuses.has(selectedJob.status)
+      ? selectedJob
+      : activeBackgroundJob;
   const voices = voicesQuery.data?.items ?? [];
   const selectedVoice =
     voices.find((voice) => voice.voice_id === voiceId) ?? null;
-  const isRefreshing =
-    jobQuery.isFetching ||
-    artifactsQuery.isFetching ||
-    providerRequestsQuery.isFetching;
-  const isLoadingJob =
-    jobQuery.isLoading ||
-    artifactsQuery.isLoading ||
-    providerRequestsQuery.isLoading;
-  const dashboardError =
-    jobQuery.error ?? artifactsQuery.error ?? providerRequestsQuery.error;
+
+  useEffect(() => {
+    if (!activeBackgroundJob) return;
+    if (
+      selectedJobId === null ||
+      (selectedJob && !runningJobStatuses.has(selectedJob.status))
+    ) {
+      setSelectedJobId(activeBackgroundJob.id);
+    }
+  }, [activeBackgroundJob, selectedJob, selectedJobId]);
+
+  const dashboardError = jobQuery.error ?? activeJobsQuery.error;
   const error =
     formError ??
     (dashboardError
@@ -331,49 +219,13 @@ export default function DashboardPage() {
     setFormError(null);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
-      queryClient.invalidateQueries({ queryKey: ["artifacts", jobId] }),
-      queryClient.invalidateQueries({ queryKey: ["provider-requests", jobId] }),
+      queryClient.invalidateQueries({ queryKey: ["jobs", "running"] }),
     ]);
   }
 
   function handleCreateAndUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     createAndUploadMutation.mutate();
-  }
-
-  function handleLoadExisting(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const parsedId = Number(jobIdInput);
-    if (!Number.isInteger(parsedId) || parsedId <= 0) {
-      setFormError("Enter a valid numeric job ID.");
-      return;
-    }
-
-    setFormError(null);
-    setSelectedJobId(parsedId);
-  }
-
-  function handleRetryJob() {
-    if (!job || job.status !== "failed") return;
-    retryJobMutation.mutate(job.id);
-  }
-
-  function handleCancelJob() {
-    if (!job || !cancelableStatuses.has(job.status)) return;
-    if (
-      window.confirm(
-        "Cancel this job? Partial intermediate artifacts may remain available for retry diagnostics.",
-      )
-    ) {
-      cancelJobMutation.mutate(job.id);
-    }
-  }
-
-  function handleDeleteJob() {
-    if (!job) return;
-    if (window.confirm("Delete this job and its local artifact files?")) {
-      deleteJobMutation.mutate(job.id);
-    }
   }
 
   return (
@@ -387,9 +239,8 @@ export default function DashboardPage() {
             AI Lab
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-            Create a video collection, upload source video, watch websocket
-            status updates, and inspect the generated artifacts and provider
-            requests from one Tailwind + shadcn/ui client-side app.
+            Create a video collection, upload source video, and watch websocket
+            status updates while the pipeline runs in the background.
           </p>
         </div>
         <Card className="border-primary/10 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur">
@@ -408,7 +259,7 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      <section className="mb-6 grid gap-6 lg:grid-cols-2">
+      <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,42rem)]">
         <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
           <CardHeader className="grid-cols-[auto_1fr] items-center">
             <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
@@ -454,7 +305,9 @@ export default function DashboardPage() {
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="translation-context">Translation context</Label>
+                  <Label htmlFor="translation-context">
+                    Translation context
+                  </Label>
                   <span className="text-xs text-muted-foreground">
                     {translationContext.length}/100
                   </span>
@@ -464,10 +317,13 @@ export default function DashboardPage() {
                   maxLength={100}
                   placeholder="Optional: names, tone, topic"
                   value={translationContext}
-                  onChange={(event) => setTranslationContext(event.target.value)}
+                  onChange={(event) =>
+                    setTranslationContext(event.target.value)
+                  }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Added to the translation prompt to preserve wording, tone, and names.
+                  Added to the translation prompt to preserve wording, tone, and
+                  names.
                 </p>
               </div>
               <div className="grid gap-2">
@@ -628,129 +484,9 @@ export default function DashboardPage() {
             </form>
           </CardContent>
         </Card>
-
-        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
-          <CardHeader className="grid-cols-[auto_1fr] items-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
-              2
-            </span>
-            <div>
-              <CardTitle>Open existing job</CardTitle>
-              <CardDescription>
-                Use a job ID from Swagger, logs, or a previous dashboard
-                session.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4" onSubmit={handleLoadExisting}>
-              <div className="grid gap-2">
-                <Label htmlFor="job-id">Job ID</Label>
-                <Input
-                  id="job-id"
-                  inputMode="numeric"
-                  placeholder="Example: 1"
-                  value={jobIdInput}
-                  onChange={(event) => setJobIdInput(event.target.value)}
-                />
-              </div>
-              <Button type="submit" size="lg" disabled={isLoadingJob}>
-                {isLoadingJob && <Loader2 className="animate-spin" />}
-                {isLoadingJob ? "Loading…" : "Load job"}
-              </Button>
-              {job && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => refreshDashboard(job.id)}
-                  disabled={isRefreshing}
-                >
-                  <RefreshCw className={cn(isRefreshing && "animate-spin")} />
-                  Refresh now
-                </Button>
-              )}
-              {job?.status === "failed" && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={handleRetryJob}
-                  disabled={retryJobMutation.isPending}
-                >
-                  <RefreshCw
-                    className={cn(retryJobMutation.isPending && "animate-spin")}
-                  />
-                  {retryJobMutation.isPending ? "Retrying…" : "Retry failed job"}
-                </Button>
-              )}
-              {job && cancelableStatuses.has(job.status) && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={handleCancelJob}
-                  disabled={cancelJobMutation.isPending}
-                >
-                  {cancelJobMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Ban />
-                  )}
-                  {cancelJobMutation.isPending ? "Canceling…" : "Cancel job"}
-                </Button>
-              )}
-              {job?.status === "completed" && (
-                <Link
-                  className={buttonVariants({
-                    variant: "secondary",
-                    size: "lg",
-                  })}
-                  to={`/publish?jobId=${job.id}`}
-                >
-                  Publish this job
-                </Link>
-              )}
-              {job && (
-                <Button
-                  variant="destructive"
-                  type="button"
-                  onClick={handleDeleteJob}
-                  disabled={deleteJobMutation.isPending}
-                >
-                  {deleteJobMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Trash2 />
-                  )}
-                  {deleteJobMutation.isPending ? "Deleting…" : "Delete job"}
-                </Button>
-              )}
-            </form>
-          </CardContent>
-        </Card>
       </section>
 
-      <JobStatusCard job={job} />
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <DataPanel
-          title="Artifacts"
-          count={artifacts.length}
-          emptyLabel="No artifacts yet"
-        >
-          {artifacts.map((artifact) => (
-            <ArtifactRow artifact={artifact} key={artifact.id} />
-          ))}
-        </DataPanel>
-
-        <DataPanel
-          title="Provider requests"
-          count={providerRequests.length}
-          emptyLabel="No provider requests yet"
-        >
-          {providerRequests.map((request) => (
-            <ProviderRequestRow request={request} key={request.id} />
-          ))}
-        </DataPanel>
-      </section>
+      {job && <JobStatusCard job={job} />}
     </>
   );
 }
