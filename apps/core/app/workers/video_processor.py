@@ -40,6 +40,8 @@ WORK_DIR = Path("uploads/work")
 PROCESSED_OUTPUT_DIR = Path("uploads/processed_videos")
 logger = logging.getLogger(__name__)
 
+_MAX_SUBTITLE_WORDS = 7
+
 WHISPER_LANGUAGE_ALIASES = {
     "cmn": "zh",
     "fil": "tl",
@@ -488,11 +490,244 @@ class VideoProcessingWorker:
         detected_language = (
             getattr(info, "language", None) or normalized_language or None
         )
+        transcript_segments = self._split_transcript_segments(
+            transcript_segments, language=detected_language
+        )
         return {
             "language": detected_language,
             "duration": getattr(info, "duration", None),
             "segments": transcript_segments,
         }
+
+    def _split_transcript_segments(
+        self, segments: list[dict[str, object]], language: str | None = None
+    ) -> list[dict[str, object]]:
+        if language and os.getenv("OPENAI_API_KEY"):
+            result = self._split_segments_with_openai(segments, language)
+        else:
+            result = self._split_segments_by_word_count(segments)
+        for out_idx, seg in enumerate(result):
+            seg["index"] = out_idx
+        return result
+
+    def _split_segments_by_word_count(
+        self, segments: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = []
+        for segment in segments:
+            words = segment.get("words")
+            if isinstance(words, list) and words:
+                split = self._split_words_into_subtitle_lines(words, segment)
+            else:
+                split = self._split_text_into_subtitle_lines(segment)
+            result.extend(split)
+        return result
+
+    def _split_segments_with_openai(
+        self, segments: list[dict[str, object]], language: str
+    ) -> list[dict[str, object]]:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            return self._split_segments_by_word_count(segments)
+
+        texts = [str(seg.get("text") or "").strip() for seg in segments]
+        system_text = (
+            f"You are a subtitle phrase editor for {language} subtitles.\n\n"
+            "Task: Split each subtitle sentence into short, natural grammatical phrases for video display.\n\n"
+            "Rules:\n"
+            "1. Return ONLY a raw JSON array of arrays of strings. No markdown, no extra text.\n"
+            "2. The outer array must have EXACTLY the same number of elements as the input array.\n"
+            "3. Each inner array contains the grammatical phrase chunks for that subtitle line.\n"
+            "4. Split at natural grammatical boundaries: subject / verb phrase / object or complement.\n"
+            "5. Each phrase should be 2-6 words. If a line is already 1-4 words, return it as a single-element inner array.\n"
+            "6. Preserve ALL original text verbatim — joining the inner array with spaces must reproduce the original string exactly (same words, same order, same spelling).\n"
+            "7. Never split in the middle of a proper noun, compound word, number, or fixed idiom.\n"
+        )
+        model = os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-4.1-mini")
+        payload = {
+            "model": model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_text}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": json.dumps(texts, ensure_ascii=False),
+                        }
+                    ],
+                },
+            ],
+        }
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            logger.warning("OpenAI subtitle splitting failed, falling back to word-count split: %s", exc)
+            return self._split_segments_by_word_count(segments)
+
+        raw_output = self._extract_openai_output_text(response_data)
+        parsed = self._json_load_value(raw_output)
+        if parsed is None:
+            parsed = self._json_load_value(self._strip_markdown_code_fences(raw_output))
+        if not isinstance(parsed, list) or len(parsed) != len(segments):
+            logger.warning(
+                "OpenAI subtitle splitting returned unexpected output (got %s items for %s segments); "
+                "falling back to word-count split",
+                len(parsed) if isinstance(parsed, list) else "non-list",
+                len(segments),
+            )
+            return self._split_segments_by_word_count(segments)
+
+        result: list[dict[str, object]] = []
+        for segment, phrase_list in zip(segments, parsed):
+            if not isinstance(phrase_list, list) or not phrase_list:
+                result.append(segment)
+                continue
+            phrases = [str(p).strip() for p in phrase_list if str(p).strip()]
+            if len(phrases) <= 1:
+                result.append(segment)
+                continue
+            words = segment.get("words")
+            if isinstance(words, list) and words:
+                result.extend(self._phrases_to_sub_segments_with_words(segment, phrases, words))
+            else:
+                result.extend(self._phrases_to_sub_segments_by_chars(segment, phrases))
+        return result
+
+    def _phrases_to_sub_segments_with_words(
+        self,
+        segment: dict[str, object],
+        phrases: list[str],
+        words: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        phrase_word_counts = [len(p.split()) for p in phrases]
+        if sum(phrase_word_counts) != len(words):
+            return self._phrases_to_sub_segments_by_chars(segment, phrases)
+        result: list[dict[str, object]] = []
+        word_idx = 0
+        for phrase, wcount in zip(phrases, phrase_word_counts):
+            phrase_words = words[word_idx : word_idx + wcount]
+            word_idx += wcount
+            seg = self._words_group_to_segment(phrase_words, segment)
+            seg["text"] = phrase
+            result.append(seg)
+        return result
+
+    def _phrases_to_sub_segments_by_chars(
+        self,
+        segment: dict[str, object],
+        phrases: list[str],
+    ) -> list[dict[str, object]]:
+        start = self._coerce_seconds(segment.get("start"), default=0.0)
+        end = self._coerce_seconds(segment.get("end"), default=start + 0.1)
+        duration = end - start
+        full_text = " ".join(phrases)
+        total_chars = max(1, len(full_text))
+        result: list[dict[str, object]] = []
+        char_offset = 0
+        for idx, phrase in enumerate(phrases):
+            phrase_start = start + (char_offset / total_chars) * duration
+            char_offset += len(phrase) + 1
+            phrase_end = (
+                end
+                if idx == len(phrases) - 1
+                else start + (char_offset / total_chars) * duration
+            )
+            result.append({
+                "index": 0,
+                "start": round(phrase_start, 3),
+                "end": round(min(phrase_end, end), 3),
+                "text": phrase,
+            })
+        return result
+
+    def _split_words_into_subtitle_lines(
+        self,
+        words: list[dict[str, object]],
+        parent_segment: dict[str, object],
+    ) -> list[dict[str, object]]:
+        lines: list[dict[str, object]] = []
+        current_words: list[dict[str, object]] = []
+        for word in words:
+            current_words.append(word)
+            word_text = str(word.get("text") or "")
+            at_boundary = any(word_text.endswith(p) for p in (".", "?", "!", "\u2026"))
+            if at_boundary or len(current_words) >= _MAX_SUBTITLE_WORDS:
+                lines.append(self._words_group_to_segment(current_words, parent_segment))
+                current_words = []
+        if current_words:
+            lines.append(self._words_group_to_segment(current_words, parent_segment))
+        return lines or [parent_segment]
+
+    def _words_group_to_segment(
+        self,
+        words: list[dict[str, object]],
+        parent_segment: dict[str, object],
+    ) -> dict[str, object]:
+        parent_start = self._coerce_seconds(parent_segment.get("start"), default=0.0)
+        parent_end = self._coerce_seconds(parent_segment.get("end"), default=parent_start + 0.1)
+        start = self._coerce_seconds(words[0].get("start"), default=parent_start)
+        end = self._coerce_seconds(words[-1].get("end"), default=parent_end)
+        text = " ".join(str(w.get("text") or "").strip() for w in words).strip()
+        return {
+            "index": 0,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+            "words": words,
+        }
+
+    def _split_text_into_subtitle_lines(
+        self,
+        segment: dict[str, object],
+    ) -> list[dict[str, object]]:
+        text = str(segment.get("text") or "").strip()
+        start = self._coerce_seconds(segment.get("start"), default=0.0)
+        end = self._coerce_seconds(segment.get("end"), default=start + 0.1)
+        word_list = text.split()
+        if len(word_list) <= _MAX_SUBTITLE_WORDS:
+            return [segment]
+        chunks: list[list[str]] = []
+        current: list[str] = []
+        for word in word_list:
+            current.append(word)
+            at_boundary = any(word.endswith(p) for p in (".", "?", "!", "\u2026"))
+            if at_boundary or len(current) >= _MAX_SUBTITLE_WORDS:
+                chunks.append(current)
+                current = []
+        if current:
+            chunks.append(current)
+        if len(chunks) <= 1:
+            return [segment]
+        duration = end - start
+        total_chars = max(1, len(text))
+        lines: list[dict[str, object]] = []
+        char_offset = 0
+        for chunk_idx, chunk_words in enumerate(chunks):
+            chunk_text = " ".join(chunk_words)
+            chunk_start = start + (char_offset / total_chars) * duration
+            char_offset += len(chunk_text) + 1
+            chunk_end = end if chunk_idx == len(chunks) - 1 else start + (char_offset / total_chars) * duration
+            lines.append({
+                "index": 0,
+                "start": round(chunk_start, 3),
+                "end": round(min(chunk_end, end), 3),
+                "text": chunk_text,
+            })
+        return lines
 
     def _transcript_to_srt(self, transcript: dict[str, object]) -> str:
         blocks: list[str] = []
