@@ -597,8 +597,8 @@ class VideoProcessingWorker:
             "2. **Dubbing Constraint — Timing Is King:**\n"
             "   - **Hard Constraint:** Each translation must be speakable at a natural, "
             "conversational pace within its `duration_seconds`.\n"
-            "   - **Rate heuristic:** Target ~3–4 words per second. "
-            "For example, a 2-second cue should contain no more than 6–8 words.\n"
+            "   - **Rate heuristic:** Target ~3-4 words per second. "
+            "For example, a 2-second cue should contain no more than 6-8 words.\n"
             "   - **Priority:** Timing and brevity > literal accuracy.\n"
             "   - If a literal translation is too long, use shorter synonyms, compress phrasing, "
             "or omit non-essential filler words. The line must fit without forcing "
@@ -659,21 +659,58 @@ class VideoProcessingWorker:
             raise PipelineError(f"OpenAI target script request failed: {exc}") from exc
 
         raw_output = self._extract_openai_output_text(response_data)
-        parsed = self._json_load_object(raw_output)
+        parsed = self._json_load_value(raw_output)
         if parsed is None:
-            parsed = self._json_load_object(
+            parsed = self._json_load_value(
                 self._strip_markdown_code_fences(raw_output)
             )
         if parsed is None:
             raise PipelineError("OpenAI target script output was not valid JSON")
+        if isinstance(parsed, list):
+            parsed = self._build_script_from_translation_list(
+                parsed, source_transcript, target_language
+            )
         return self._normalize_target_script(parsed, target_language)
 
-    def _json_load_object(self, raw: str) -> dict[str, object] | None:
+    def _json_load_value(self, raw: str) -> dict[str, object] | list | None:
         try:
             loaded = json.loads(raw)
         except json.JSONDecodeError:
             return None
-        return loaded if isinstance(loaded, dict) else None
+        return loaded if isinstance(loaded, (dict, list)) else None
+
+    def _build_script_from_translation_list(
+        self,
+        translations: list,
+        source_transcript: dict[str, object],
+        target_language: str,
+    ) -> dict[str, object]:
+        segments = self._get_transcript_segments(source_transcript)
+        chunks: list[dict[str, object]] = []
+        for idx, (translation, segment) in enumerate(zip(translations, segments)):
+            text = str(translation).strip()
+            if not text:
+                continue
+            chunks.append(
+                {
+                    "index": idx,
+                    "text": text,
+                    "source_start": self._coerce_seconds(
+                        segment.get("start"), default=0.0
+                    ),
+                    "source_end": self._coerce_seconds(
+                        segment.get("end"), default=0.0
+                    ),
+                }
+            )
+        script_text = " ".join(str(chunk["text"]) for chunk in chunks)
+        return {
+            "target_language": target_language,
+            "style_notes": "",
+            "script": script_text,
+            "chunks": chunks,
+            "glossary": [],
+        }
 
     def _normalize_target_script(
         self, script_data: dict[str, object], target_language: str
