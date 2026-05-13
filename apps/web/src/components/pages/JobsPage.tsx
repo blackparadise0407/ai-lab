@@ -261,7 +261,7 @@ export default function JobsPage() {
                             variant: "secondary",
                             size: "sm",
                           })}
-                          to={`/?jobId=${job.id}`}
+                          to={`/jobs/${job.id}`}
                         >
                           <Search />
                           Details
