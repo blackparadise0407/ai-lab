@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Controller, type SubmitHandler, useForm } from "react-hook-form";
 import { Loader2, Plug, PlugZap } from "lucide-react";
 
 import {
@@ -40,6 +41,17 @@ import { JobStatusCard } from "./job-detail-ui";
 
 const defaultVoiceValue = "__provider_default__";
 
+type CreateVideoCollectionFormValues = {
+  sourceLanguage: string;
+  targetLanguage: string;
+  translationContext: string;
+  voiceId: string;
+  outputVideoSpeed: number;
+  originalAudioVolume: number;
+  splitThresholdSeconds: number;
+  sourceVideo: FileList;
+};
+
 const runningJobStatuses = new Set<Job["status"]>([
   "created",
   "uploaded",
@@ -49,15 +61,27 @@ const runningJobStatuses = new Set<Job["status"]>([
 ]);
 
 export default function DashboardPage() {
-  const [sourceLanguage, setSourceLanguage] = useState("zh");
-  const [targetLanguage, setTargetLanguage] = useState(
-    DEFAULT_TARGET_LANGUAGE_CODE,
-  );
-  const [translationContext, setTranslationContext] = useState("");
-  const [voiceId, setVoiceId] = useState("");
-  const [outputVideoSpeed, setOutputVideoSpeed] = useState("1");
-  const [originalAudioVolume, setOriginalAudioVolume] = useState("0.15");
-  const [file, setFile] = useState<File | null>(null);
+  const {
+    control,
+    formState: { errors },
+    handleSubmit,
+    register,
+    setValue,
+    watch,
+  } = useForm<CreateVideoCollectionFormValues>({
+    defaultValues: {
+      sourceLanguage: "zh",
+      targetLanguage: DEFAULT_TARGET_LANGUAGE_CODE,
+      translationContext: "",
+      voiceId: "",
+      outputVideoSpeed: 1,
+      originalAudioVolume: 0.15,
+      splitThresholdSeconds: 60,
+    },
+  });
+  const targetLanguage = watch("targetLanguage");
+  const translationContext = watch("translationContext") ?? "";
+  const voiceId = watch("voiceId") ?? "";
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [socketStatus, setSocketStatus] = useState<
@@ -113,12 +137,13 @@ export default function DashboardPage() {
   });
 
   const createAndUploadMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (values: CreateVideoCollectionFormValues) => {
+      const file = values.sourceVideo?.[0] ?? null;
       if (!file) {
         throw new Error("Choose a source video before creating a collection.");
       }
 
-      const parsedOutputVideoSpeed = Number(outputVideoSpeed);
+      const parsedOutputVideoSpeed = Number(values.outputVideoSpeed);
       if (
         !Number.isFinite(parsedOutputVideoSpeed) ||
         parsedOutputVideoSpeed <= 0 ||
@@ -129,7 +154,7 @@ export default function DashboardPage() {
         );
       }
 
-      const parsedOriginalAudioVolume = Number(originalAudioVolume);
+      const parsedOriginalAudioVolume = Number(values.originalAudioVolume);
       if (
         !Number.isFinite(parsedOriginalAudioVolume) ||
         parsedOriginalAudioVolume < 0 ||
@@ -138,20 +163,28 @@ export default function DashboardPage() {
         throw new Error("Original audio volume must be between 0 and 1.");
       }
 
-      const trimmedTranslationContext = translationContext.trim();
+      const trimmedTranslationContext = values.translationContext.trim();
       if (trimmedTranslationContext.length > 100) {
         throw new Error("Translation context must be 100 characters or fewer.");
       }
 
+      const parsedSplitThresholdSeconds = Number(values.splitThresholdSeconds);
+      if (
+        !Number.isFinite(parsedSplitThresholdSeconds) ||
+        parsedSplitThresholdSeconds <= 0
+      ) {
+        throw new Error("Split threshold must be greater than 0 seconds.");
+      }
+
       const collection = await createVideoCollection({
-        source_language: sourceLanguage,
-        target_language: targetLanguage,
+        source_language: values.sourceLanguage,
+        target_language: values.targetLanguage,
         translation_context: trimmedTranslationContext || null,
         title: file.name,
-        voice_id: voiceId || null,
+        voice_id: values.voiceId || null,
         output_video_speed: parsedOutputVideoSpeed,
         original_audio_volume: parsedOriginalAudioVolume,
-        split_threshold_seconds: 60,
+        split_threshold_seconds: parsedSplitThresholdSeconds,
       });
       return uploadVideoCollectionSource(collection.id, file);
     },
@@ -205,8 +238,12 @@ export default function DashboardPage() {
   }, [activeBackgroundJob, selectedJob, selectedJobId]);
 
   const dashboardError = jobQuery.error ?? activeJobsQuery.error;
+  const formValidationError = Object.values(errors).find(
+    (fieldError) => typeof fieldError?.message === "string",
+  )?.message as string | undefined;
   const error =
     formError ??
+    formValidationError ??
     (dashboardError
       ? getErrorMessage(dashboardError, "Unable to refresh the dashboard.")
       : null);
@@ -223,10 +260,12 @@ export default function DashboardPage() {
     ]);
   }
 
-  function handleCreateAndUpload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    createAndUploadMutation.mutate();
-  }
+  const handleCreateAndUpload: SubmitHandler<
+    CreateVideoCollectionFormValues
+  > = (values) => {
+    setFormError(null);
+    createAndUploadMutation.mutate(values);
+  };
 
   return (
     <>
@@ -273,35 +312,46 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <form className="grid gap-4" onSubmit={handleCreateAndUpload}>
+            <form
+              className="grid gap-4"
+              onSubmit={handleSubmit(handleCreateAndUpload)}
+            >
               <div className="grid gap-2">
                 <Label htmlFor="source-language">Source language</Label>
                 <Input
                   id="source-language"
-                  value={sourceLanguage}
-                  onChange={(event) => setSourceLanguage(event.target.value)}
+                  {...register("sourceLanguage", {
+                    required: "Source language is required.",
+                  })}
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="target-language">Target language</Label>
-                <Select
-                  value={targetLanguage}
-                  onValueChange={(value) => {
-                    setTargetLanguage(value);
-                    setVoiceId("");
-                  }}
-                >
-                  <SelectTrigger id="target-language">
-                    <SelectValue placeholder="Select target language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {targetLanguages.map((language) => (
-                      <SelectItem key={language.code} value={language.code}>
-                        {language.name} ({language.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  control={control}
+                  name="targetLanguage"
+                  rules={{ required: "Target language is required." }}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) => {
+                        field.onChange(value);
+                        setValue("voiceId", "");
+                      }}
+                    >
+                      <SelectTrigger id="target-language">
+                        <SelectValue placeholder="Select target language" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {targetLanguages.map((language) => (
+                          <SelectItem key={language.code} value={language.code}>
+                            {language.name} ({language.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
@@ -316,10 +366,13 @@ export default function DashboardPage() {
                   id="translation-context"
                   maxLength={100}
                   placeholder="Optional: names, tone, topic"
-                  value={translationContext}
-                  onChange={(event) =>
-                    setTranslationContext(event.target.value)
-                  }
+                  {...register("translationContext", {
+                    maxLength: {
+                      value: 100,
+                      message:
+                        "Translation context must be 100 characters or fewer.",
+                    },
+                  })}
                 />
                 <p className="text-xs text-muted-foreground">
                   Added to the translation prompt to preserve wording, tone, and
@@ -328,36 +381,45 @@ export default function DashboardPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="voice-id">Voice</Label>
-                <Select
-                  value={voiceId || defaultVoiceValue}
-                  disabled={voicesQuery.isLoading}
-                  onValueChange={(value) =>
-                    setVoiceId(value === defaultVoiceValue ? "" : value)
-                  }
-                >
-                  <SelectTrigger id="voice-id">
-                    <SelectValue placeholder="Default provider voice" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={defaultVoiceValue}>
-                      Default provider voice
-                    </SelectItem>
-                    {voices.map((voice) => (
-                      <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                        {voice.credit_factor && voice.credit_factor > 1 ? (
-                          <>
-                            {voice.name}
-                            <Badge variant="secondary">
-                              x{voice.credit_factor}
-                            </Badge>
-                          </>
-                        ) : (
-                          voice.name
-                        )}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  control={control}
+                  name="voiceId"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || defaultVoiceValue}
+                      disabled={voicesQuery.isLoading}
+                      onValueChange={(value) =>
+                        field.onChange(value === defaultVoiceValue ? "" : value)
+                      }
+                    >
+                      <SelectTrigger id="voice-id">
+                        <SelectValue placeholder="Default provider voice" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={defaultVoiceValue}>
+                          Default provider voice
+                        </SelectItem>
+                        {voices.map((voice) => (
+                          <SelectItem
+                            key={voice.voice_id}
+                            value={voice.voice_id}
+                          >
+                            {voice.credit_factor && voice.credit_factor > 1 ? (
+                              <>
+                                {voice.name}
+                                <Badge variant="secondary">
+                                  x{voice.credit_factor}
+                                </Badge>
+                              </>
+                            ) : (
+                              voice.name
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
                 {selectedVoice && (
                   <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
                     <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -431,10 +493,17 @@ export default function DashboardPage() {
                     min="0.1"
                     max="4"
                     step="0.05"
-                    value={outputVideoSpeed}
-                    onChange={(event) =>
-                      setOutputVideoSpeed(event.target.value)
-                    }
+                    {...register("outputVideoSpeed", {
+                      valueAsNumber: true,
+                      min: {
+                        value: 0.1,
+                        message: "Output video speed must be greater than 0.",
+                      },
+                      max: {
+                        value: 4,
+                        message: "Output video speed must be no more than 4.",
+                      },
+                    })}
                   />
                   <p className="text-xs text-muted-foreground">
                     Applied only during final muxing; default is 1x.
@@ -450,10 +519,18 @@ export default function DashboardPage() {
                     min="0"
                     max="1"
                     step="0.01"
-                    value={originalAudioVolume}
-                    onChange={(event) =>
-                      setOriginalAudioVolume(event.target.value)
-                    }
+                    {...register("originalAudioVolume", {
+                      valueAsNumber: true,
+                      min: {
+                        value: 0,
+                        message: "Original audio volume must be at least 0.",
+                      },
+                      max: {
+                        value: 1,
+                        message:
+                          "Original audio volume must be no more than 1.",
+                      },
+                    })}
                   />
                   <p className="text-xs text-muted-foreground">
                     Mixed under the dub at the final step; default is 0.15.
@@ -461,12 +538,38 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="grid gap-2">
+                <Label htmlFor="split-threshold-seconds">
+                  Split threshold seconds
+                </Label>
+                <Input
+                  id="split-threshold-seconds"
+                  type="number"
+                  min="1"
+                  step="1"
+                  {...register("splitThresholdSeconds", {
+                    valueAsNumber: true,
+                    min: {
+                      value: 1,
+                      message:
+                        "Split threshold must be greater than 0 seconds.",
+                    },
+                  })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Source videos longer than this are split into chunks; default
+                  is 60 seconds.
+                </p>
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="source-video">Source video</Label>
                 <Input
                   id="source-video"
                   type="file"
                   accept="video/*"
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  {...register("sourceVideo", {
+                    required:
+                      "Choose a source video before creating a collection.",
+                  })}
                 />
               </div>
               <Button
