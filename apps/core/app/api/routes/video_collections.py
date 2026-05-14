@@ -2,28 +2,36 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.job_updates import job_update_broker
 from app.db.database import get_session
-from app.models.entities import Artifact, Job, JobStatus, VideoCollection, VideoSegment
+from app.models.entities import Artifact, ConnectedAccount, Job, JobStatus, VideoCollection, VideoCollectionRender, VideoSegment
 from app.schemas.jobs import JobResponse
 from app.schemas.video_collections import (
     VideoCollectionCreateRequest,
     VideoCollectionDetailResponse,
     VideoCollectionListResponse,
+    VideoCollectionRenderCreateRequest,
+    VideoCollectionRenderListResponse,
+    VideoCollectionRenderPublishRequest,
+    VideoCollectionRenderResponse,
     VideoCollectionResponse,
     VideoSegmentArtifactResponse,
     VideoSegmentResponse,
 )
 from app.services.deletion import delete_collection_and_artifacts
 from app.services.video_collections import refresh_collection_rollup
+from app.services.video_combiner import VideoCombineError, combine_videos
 from app.services.video_splitter import VideoSplitError, split_video
+from app.providers.upload_provider import UploadCredentials, UploadProviderClient, UploadProviderError, UploadRequest
 from app.workers.video_processor import (
     SOURCE_VIDEO_ARTIFACT_TYPE,
     PROCESSED_ARTIFACT_TYPE,
@@ -34,6 +42,9 @@ router = APIRouter(prefix="/v1/video-collections", tags=["video_collections"])
 
 COLLECTION_UPLOADS_DIR = Path("uploads/source_videos")
 COLLECTION_SEGMENTS_DIR = Path("uploads/source_segments")
+COLLECTION_RENDERS_DIR = Path("uploads/collection_renders")
+
+upload_provider_client = UploadProviderClient()
 
 
 @router.post(
@@ -219,6 +230,161 @@ async def upload_collection_video(
 
     return _collection_detail_response(session, collection)
 
+@router.get(
+    "/{collection_id}/renders",
+    response_model=VideoCollectionRenderListResponse,
+    summary="List combined renders for a video collection",
+)
+def list_video_collection_renders(
+    collection_id: int, session: Session = Depends(get_session)
+):
+    _get_collection_or_404(session, collection_id)
+    renders = list(
+        session.exec(
+            select(VideoCollectionRender)
+            .where(VideoCollectionRender.collection_id == collection_id)
+            .order_by(VideoCollectionRender.created_at.desc())
+        ).all()
+    )
+    return {"items": [_render_response(render) for render in renders]}
+
+
+@router.post(
+    "/{collection_id}/renders",
+    response_model=VideoCollectionRenderResponse,
+    status_code=201,
+    summary="Combine processed collection segments into one long video",
+)
+def create_video_collection_render(
+    collection_id: int,
+    payload: VideoCollectionRenderCreateRequest,
+    session: Session = Depends(get_session),
+):
+    collection = _get_collection_or_404(session, collection_id)
+    refresh_collection_rollup(session, collection)
+    selected_segments = _select_render_segments(session, collection_id, payload.segment_ids)
+
+    render = VideoCollectionRender(
+        collection_id=collection_id,
+        status=JobStatus.PROCESSING,
+        current_step="combining_segments",
+        progress_percent=25,
+        included_segment_ids=",".join(str(segment.id) for segment, _ in selected_segments),
+    )
+    session.add(render)
+    session.commit()
+    session.refresh(render)
+
+    output_path = COLLECTION_RENDERS_DIR / f"collection_{collection_id}" / f"render_{render.id}_{uuid4().hex[:8]}.mp4"
+    try:
+        combined = combine_videos([Path(artifact.storage_url) for _, artifact in selected_segments], output_path)
+    except VideoCombineError as exc:
+        render.status = JobStatus.FAILED
+        render.current_step = "combine_failed"
+        render.progress_percent = 100
+        render.error_message = str(exc)
+        render.updated_at = datetime.now(timezone.utc)
+        session.add(render)
+        session.commit()
+        session.refresh(render)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    render.status = JobStatus.COMPLETED
+    render.current_step = "combined_video_ready"
+    render.progress_percent = 100
+    render.output_path = str(combined.path)
+    render.duration_seconds = combined.duration_seconds
+    render.updated_at = datetime.now(timezone.utc)
+    session.add(render)
+    session.commit()
+    session.refresh(render)
+    return _render_response(render)
+
+
+@router.get(
+    "/{collection_id}/renders/{render_id}",
+    response_model=VideoCollectionRenderResponse,
+    summary="Get a combined collection render",
+)
+def get_video_collection_render(
+    collection_id: int, render_id: int, session: Session = Depends(get_session)
+):
+    render = _get_render_or_404(session, collection_id, render_id)
+    return _render_response(render)
+
+
+@router.get(
+    "/{collection_id}/renders/{render_id}/preview",
+    summary="Preview a combined collection render",
+)
+def preview_video_collection_render(
+    collection_id: int,
+    render_id: int,
+    range_header: str | None = Header(default=None, alias="Range"),
+    session: Session = Depends(get_session),
+):
+    render = _get_render_or_404(session, collection_id, render_id)
+    render_path = _render_output_path_or_404(render)
+    return _video_file_response(render_path, render.content_type, range_header, inline=True)
+
+
+@router.get(
+    "/{collection_id}/renders/{render_id}/download",
+    summary="Download a combined collection render",
+)
+def download_video_collection_render(
+    collection_id: int, render_id: int, session: Session = Depends(get_session)
+):
+    render = _get_render_or_404(session, collection_id, render_id)
+    render_path = _render_output_path_or_404(render)
+    return FileResponse(
+        path=render_path,
+        media_type=render.content_type,
+        filename=render_path.name,
+        content_disposition_type="attachment",
+    )
+
+
+@router.post(
+    "/{collection_id}/renders/{render_id}/uploads",
+    response_model=VideoCollectionRenderResponse,
+    summary="Publish a combined collection render",
+)
+def publish_video_collection_render(
+    collection_id: int,
+    render_id: int,
+    payload: VideoCollectionRenderPublishRequest,
+    session: Session = Depends(get_session),
+):
+    render = _get_render_or_404(session, collection_id, render_id)
+    if render.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Render must be completed before publishing")
+
+    render_path = _render_output_path_or_404(render)
+    try:
+        result = upload_provider_client.upload(
+            payload.platform,
+            UploadRequest(
+                job_id=-(render.id or 0),
+                video_path=render_path,
+                title=payload.title,
+                description=payload.description,
+                privacy=payload.privacy,
+            ),
+            credentials=_get_upload_credentials(session, payload),
+        )
+    except UploadProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    render.published_platform = result.platform
+    render.provider_request_id = result.provider_request_id
+    render.remote_url = result.remote_url
+    render.updated_at = datetime.now(timezone.utc)
+    session.add(render)
+    session.commit()
+    session.refresh(render)
+    return _render_response(render)
+
 
 @router.delete(
     "/{collection_id}",
@@ -316,3 +482,211 @@ def _segment_responses(session: Session, collection_id: int) -> list[dict]:
         )
         responses.append(data)
     return responses
+
+
+def _select_render_segments(
+    session: Session, collection_id: int, segment_ids: list[int]
+) -> list[tuple[VideoSegment, Artifact]]:
+    statement = (
+        select(VideoSegment)
+        .where(VideoSegment.collection_id == collection_id)
+        .order_by(VideoSegment.sequence_index)
+    )
+    segments = list(session.exec(statement).all())
+    if segment_ids:
+        requested_ids = set(segment_ids)
+        segments = [segment for segment in segments if segment.id in requested_ids]
+        found_ids = {segment.id for segment in segments}
+        missing_ids = requested_ids - found_ids
+        if missing_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected segments must belong to the requested collection",
+            )
+
+    selected: list[tuple[VideoSegment, Artifact]] = []
+    for segment in segments:
+        job = session.get(Job, segment.job_id)
+        if not job or job.status != JobStatus.COMPLETED:
+            continue
+        artifact = None
+        if segment.processed_artifact_id:
+            artifact = session.get(Artifact, segment.processed_artifact_id)
+        if artifact is None:
+            artifact = session.exec(
+                select(Artifact).where(
+                    Artifact.job_id == segment.job_id,
+                    Artifact.artifact_type == PROCESSED_ARTIFACT_TYPE,
+                )
+            ).first()
+        if artifact:
+            selected.append((segment, artifact))
+
+    if not selected:
+        raise HTTPException(
+            status_code=409,
+            detail="Collection has no completed processed segments to combine",
+        )
+    return selected
+
+
+def _get_render_or_404(
+    session: Session, collection_id: int, render_id: int
+) -> VideoCollectionRender:
+    render = session.exec(
+        select(VideoCollectionRender).where(
+            VideoCollectionRender.id == render_id,
+            VideoCollectionRender.collection_id == collection_id,
+        )
+    ).first()
+    if not render:
+        raise HTTPException(status_code=404, detail="Collection render not found")
+    return render
+
+
+def _render_output_path_or_404(render: VideoCollectionRender) -> Path:
+    if not render.output_path:
+        raise HTTPException(status_code=404, detail="Render output is not available")
+    render_path = Path(render.output_path)
+    if not render_path.is_file():
+        raise HTTPException(status_code=404, detail="Render output file not found")
+    return render_path
+
+
+def _render_response(render: VideoCollectionRender) -> dict:
+    return {
+        "id": render.id,
+        "collection_id": render.collection_id,
+        "status": render.status,
+        "current_step": render.current_step,
+        "progress_percent": render.progress_percent,
+        "included_segment_ids": [
+            int(value)
+            for value in render.included_segment_ids.split(",")
+            if value.strip().isdigit()
+        ],
+        "output_path": render.output_path,
+        "content_type": render.content_type,
+        "duration_seconds": render.duration_seconds,
+        "error_message": render.error_message,
+        "published_platform": render.published_platform,
+        "provider_request_id": render.provider_request_id,
+        "remote_url": render.remote_url,
+        "created_at": render.created_at,
+        "updated_at": render.updated_at,
+    }
+
+
+def _video_file_response(
+    path: Path,
+    media_type: str,
+    range_header: str | None,
+    *,
+    inline: bool,
+):
+    if range_header is None:
+        return FileResponse(
+            path=path,
+            media_type=media_type,
+            filename=path.name,
+            content_disposition_type="inline" if inline else "attachment",
+            headers={"Accept-Ranges": "bytes"},
+        )
+
+    file_size = path.stat().st_size
+    byte_range = _parse_byte_range(range_header, file_size)
+    if byte_range is None:
+        return StreamingResponse(
+            iter(()),
+            status_code=416,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{file_size}",
+            },
+        )
+
+    start, end = byte_range
+    content_length = end - start + 1
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(content_length),
+    }
+    return StreamingResponse(
+        _iter_file_range(path, start, end),
+        status_code=206,
+        media_type=media_type,
+        headers=headers,
+    )
+
+
+def _parse_byte_range(range_header: str, file_size: int) -> tuple[int, int] | None:
+    if not range_header.startswith("bytes="):
+        return None
+    range_spec = range_header.removeprefix("bytes=").strip()
+    if "," in range_spec:
+        return None
+    start_text, separator, end_text = range_spec.partition("-")
+    if separator != "-":
+        return None
+    if start_text == "":
+        if not end_text.isdigit():
+            return None
+        suffix_length = int(end_text)
+        if suffix_length <= 0:
+            return None
+        start = max(file_size - suffix_length, 0)
+        end = file_size - 1
+    else:
+        if not start_text.isdigit() or (end_text and not end_text.isdigit()):
+            return None
+        start = int(start_text)
+        end = int(end_text) if end_text else file_size - 1
+    if file_size <= 0 or start >= file_size or start > end:
+        return None
+    return start, min(end, file_size - 1)
+
+
+def _iter_file_range(path: Path, start: int, end: int):
+    with path.open("rb") as video_file:
+        video_file.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = video_file.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+
+def _get_upload_credentials(
+    session: Session,
+    payload: VideoCollectionRenderPublishRequest,
+) -> UploadCredentials | None:
+    if payload.connected_account_id is None:
+        return None
+
+    connected_account = session.get(ConnectedAccount, payload.connected_account_id)
+    if not connected_account:
+        raise HTTPException(status_code=404, detail="Connected account not found")
+
+    platform = payload.platform.strip().lower()
+    if connected_account.platform != platform:
+        raise HTTPException(
+            status_code=400,
+            detail="Connected account platform does not match the requested upload platform",
+        )
+
+    scopes = tuple(scope for scope in connected_account.scopes.split() if scope)
+    return UploadCredentials(
+        access_token=connected_account.access_token,
+        refresh_token=connected_account.refresh_token,
+        token_uri=os.getenv("YOUTUBE_TOKEN_URI", "https://oauth2.googleapis.com/token")
+        if platform == "youtube"
+        else None,
+        client_id=os.getenv("YOUTUBE_CLIENT_ID") if platform == "youtube" else None,
+        client_secret=os.getenv("YOUTUBE_CLIENT_SECRET")
+        if platform == "youtube"
+        else None,
+        scopes=scopes,
+    )

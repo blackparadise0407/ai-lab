@@ -156,6 +156,32 @@ export interface VideoCollection {
   updated_at: string;
 }
 
+export interface VideoCollectionRender {
+  id: number;
+  collection_id: number;
+  status: JobStatus;
+  current_step: string;
+  progress_percent: number;
+  included_segment_ids: number[];
+  output_path?: string | null;
+  content_type: string;
+  duration_seconds?: number | null;
+  error_message?: string | null;
+  published_platform?: string | null;
+  provider_request_id?: string | null;
+  remote_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoCollectionRenderListResponse {
+  items: VideoCollectionRender[];
+}
+
+export interface VideoCollectionRenderCreateRequest {
+  segment_ids?: number[];
+}
+
 export interface VideoCollectionDetail extends VideoCollection {
   segments: VideoSegment[];
 }

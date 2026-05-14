@@ -11,6 +11,7 @@ from app.models.entities import (  # noqa: F401
     Job,
     ProviderRequest,
     VideoCollection,
+    VideoCollectionRender,
     VideoSegment,
 )
 
