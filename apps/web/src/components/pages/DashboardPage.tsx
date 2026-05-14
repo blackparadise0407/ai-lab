@@ -79,6 +79,8 @@ export default function DashboardPage() {
       splitThresholdSeconds: 60,
     },
   });
+  const sourceVideo = watch("sourceVideo");
+  const splitThresholdSeconds = watch("splitThresholdSeconds");
   const targetLanguage = watch("targetLanguage");
   const translationContext = watch("translationContext") ?? "";
   const voiceId = watch("voiceId") ?? "";
@@ -88,6 +90,8 @@ export default function DashboardPage() {
     "idle" | "connected" | "disconnected" | "error"
   >("idle");
   const queryClient = useQueryClient();
+
+  const [duration, setDuration] = useState(0);
 
   const jobQuery = useQuery({
     queryKey: ["job", selectedJobId],
@@ -106,6 +110,33 @@ export default function DashboardPage() {
     queryFn: () => getDubProviderVoices(false, targetLanguage),
     staleTime: 24 * 60 * 60 * 1000,
   });
+
+  useEffect(() => {
+    if (!sourceVideo?.[0]) return;
+
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(sourceVideo[0]);
+
+    const handleMetadata = () => {
+      setDuration(video.duration);
+      // Revoke as soon as we have what we need
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    video.preload = "metadata";
+    video.addEventListener("loadedmetadata", handleMetadata);
+    video.src = objectUrl;
+
+    return () => {
+      // Clean up listener
+      video.removeEventListener("loadedmetadata", handleMetadata);
+      // Ensure the URL is revoked if the effect re-runs or unmounts early
+      URL.revokeObjectURL(objectUrl);
+      // Stop the video from loading further
+      video.src = "";
+      video.load();
+    };
+  }, [sourceVideo]);
 
   useEffect(() => {
     if (selectedJobId === null) {
@@ -316,42 +347,47 @@ export default function DashboardPage() {
               className="grid gap-4"
               onSubmit={handleSubmit(handleCreateAndUpload)}
             >
-              <div className="grid gap-2">
-                <Label htmlFor="source-language">Source language</Label>
-                <Input
-                  id="source-language"
-                  {...register("sourceLanguage", {
-                    required: "Source language is required.",
-                  })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="target-language">Target language</Label>
-                <Controller
-                  control={control}
-                  name="targetLanguage"
-                  rules={{ required: "Target language is required." }}
-                  render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={(value) => {
-                        field.onChange(value);
-                        setValue("voiceId", "");
-                      }}
-                    >
-                      <SelectTrigger id="target-language">
-                        <SelectValue placeholder="Select target language" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {targetLanguages.map((language) => (
-                          <SelectItem key={language.code} value={language.code}>
-                            {language.name} ({language.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
+              <div className="grid gap-4 sm:grid-cols-2 items-start">
+                <div className="grid gap-2">
+                  <Label htmlFor="source-language">Source language</Label>
+                  <Input
+                    id="source-language"
+                    {...register("sourceLanguage", {
+                      required: "Source language is required.",
+                    })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="target-language">Target language</Label>
+                  <Controller
+                    control={control}
+                    name="targetLanguage"
+                    rules={{ required: "Target language is required." }}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          setValue("voiceId", "");
+                        }}
+                      >
+                        <SelectTrigger id="target-language">
+                          <SelectValue placeholder="Select target language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {targetLanguages.map((language) => (
+                            <SelectItem
+                              key={language.code}
+                              value={language.code}
+                            >
+                              {language.name} ({language.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
@@ -537,41 +573,51 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="split-threshold-seconds">
-                  Split threshold seconds
-                </Label>
-                <Input
-                  id="split-threshold-seconds"
-                  type="number"
-                  min="1"
-                  step="1"
-                  {...register("splitThresholdSeconds", {
-                    valueAsNumber: true,
-                    min: {
-                      value: 1,
-                      message:
-                        "Split threshold must be greater than 0 seconds.",
-                    },
-                  })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Source videos longer than this are split into chunks; default
-                  is 60 seconds.
-                </p>
+              <div className="grid gap-4 sm:grid-cols-2 items-start">
+                <div className="grid gap-2">
+                  <Label htmlFor="split-threshold-seconds">
+                    Split threshold seconds
+                  </Label>
+                  <Input
+                    id="split-threshold-seconds"
+                    type="number"
+                    min="1"
+                    step="1"
+                    {...register("splitThresholdSeconds", {
+                      valueAsNumber: true,
+                      min: {
+                        value: 1,
+                        message:
+                          "Split threshold must be greater than 0 seconds.",
+                      },
+                    })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Source videos longer than this are split into chunks;
+                    default is 60 seconds.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="source-video">Source video</Label>
+                  <Input
+                    id="source-video"
+                    type="file"
+                    accept="video/*"
+                    {...register("sourceVideo", {
+                      required:
+                        "Choose a source video before creating a collection.",
+                    })}
+                  />
+                  {!!duration && (
+                    <p className="text-xs text-muted-foreground">
+                      Current video duration is ~{duration.toFixed(2)} seconds.
+                      Expected chunks:{" "}
+                      {Math.ceil(duration / splitThresholdSeconds)}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="source-video">Source video</Label>
-                <Input
-                  id="source-video"
-                  type="file"
-                  accept="video/*"
-                  {...register("sourceVideo", {
-                    required:
-                      "Choose a source video before creating a collection.",
-                  })}
-                />
-              </div>
+
               <Button
                 type="submit"
                 size="lg"
