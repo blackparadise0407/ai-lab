@@ -1,26 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Controller, type SubmitHandler, useForm } from "react-hook-form";
-import { Loader2, Plug, PlugZap } from "lucide-react";
 
 import {
   DEFAULT_TARGET_LANGUAGE_CODE,
   targetLanguages,
 } from "../../constants/languages";
-import { getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
 import type {
   JobEventPayload,
   JobListResponse,
   WhisperModelName,
 } from "../../interfaces/job";
+import { getErrorMessage } from "../../lib/format";
 import {
-  apiBaseUrl,
   createVideoCollection,
   getDubProviderVoices,
   getJob,
   getJobs,
-  uploadVideoCollectionSource,
+  uploadVideoCollectionSource
 } from "../../services/api";
 import {
   subscribeToJobEvents,
@@ -35,9 +34,8 @@ import { Button } from "../ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
+  CardTitle
 } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -98,9 +96,6 @@ export default function DashboardPage() {
   const voiceId = watch("voiceId") ?? "";
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [socketStatus, setSocketStatus] = useState<
-    "idle" | "connected" | "disconnected" | "error"
-  >("idle");
   const queryClient = useQueryClient();
 
   const jobQuery = useQuery({
@@ -125,7 +120,6 @@ export default function DashboardPage() {
 
     return subscribeToJobsEvents({
       onOpen: () => {
-        setSocketStatus("connected");
         if (wasDisconnected) {
           wasDisconnected = false;
           void queryClient.invalidateQueries({ queryKey: ["jobs", "running"] });
@@ -133,11 +127,9 @@ export default function DashboardPage() {
       },
       onError: () => {
         wasDisconnected = true;
-        setSocketStatus("error");
       },
       onClose: () => {
         wasDisconnected = true;
-        setSocketStatus("disconnected");
       },
       onMessage: (payload: JobEventPayload) => {
         queryClient.setQueryData<JobListResponse | undefined>(
@@ -306,60 +298,10 @@ export default function DashboardPage() {
 
   return (
     <>
-      <section className="relative mb-8 overflow-hidden rounded-[2rem] border bg-card/80 p-6 shadow-2xl shadow-slate-950/5 backdrop-blur sm:p-8 lg:p-10">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_32%)]" />
-        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
-              AI-powered SaaS operations
-            </p>
-            <h1 className="mt-3 text-5xl font-black leading-none tracking-[-0.07em] text-foreground sm:text-7xl lg:text-8xl">
-              AI Lab
-            </h1>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-              Create production-ready short video collections, monitor live AI
-              dubbing pipelines, and move from source upload to publish with a
-              clean enterprise workflow.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-muted-foreground">
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">Real-time jobs</span>
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">AI dubbing</span>
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">Multi-channel publishing</span>
-            </div>
-          </div>
-          <Card className="border-primary/10 bg-slate-950 text-white shadow-2xl shadow-slate-950/20">
-            <CardHeader>
-              <CardDescription className="text-cyan-200">
-                Connected API
-              </CardDescription>
-              <CardTitle className="break-all text-lg text-white">
-                {apiBaseUrl}
-              </CardTitle>
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
-                {socketStatus === "connected" ? (
-                  <PlugZap className="size-4 text-emerald-300" />
-                ) : (
-                  <Plug className="size-4" />
-                )}
-                <span>Websocket {socketStatus}</span>
-              </div>
-            </CardHeader>
-          </Card>
-        </div>
-      </section>
-
       <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,42rem)]">
         <Card>
           <CardHeader className="grid-cols-[auto_1fr] items-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
-              1
-            </span>
-            <div>
-              <CardTitle>Create video collection</CardTitle>
-              <CardDescription>
-                Defaults match the current ZH → VI dubbing workflow.
-              </CardDescription>
-            </div>
+            <CardTitle>Create video collection</CardTitle>
           </CardHeader>
           <CardContent>
             <form
