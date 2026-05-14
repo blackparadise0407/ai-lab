@@ -9,7 +9,7 @@ import {
 } from "../../constants/languages";
 import { getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
-import type { Job, JobEventPayload } from "../../interfaces/job";
+import type { JobEventPayload, JobListResponse } from "../../interfaces/job";
 import {
   apiBaseUrl,
   createVideoCollection,
@@ -18,7 +18,14 @@ import {
   getJobs,
   uploadVideoCollectionSource,
 } from "../../services/api";
-import { subscribeToJobEvents } from "../../services/jobEvents";
+import {
+  subscribeToJobEvents,
+  subscribeToJobsEvents,
+} from "../../services/jobEvents";
+import {
+  applyJobEventToRunningJobs,
+  runningJobStatuses,
+} from "../../services/runningJobs";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -51,14 +58,6 @@ type CreateVideoCollectionFormValues = {
   splitThresholdSeconds: number;
   sourceVideo: FileList;
 };
-
-const runningJobStatuses = new Set<Job["status"]>([
-  "created",
-  "uploaded",
-  "processing",
-  "waiting_provider",
-  "finalizing",
-]);
 
 export default function DashboardPage() {
   const {
@@ -98,7 +97,6 @@ export default function DashboardPage() {
   const activeJobsQuery = useQuery({
     queryKey: ["jobs", "running"],
     queryFn: () => getJobs({ limit: 20 }),
-    refetchInterval: 5000,
   });
 
   const voicesQuery = useQuery({
@@ -108,20 +106,43 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
+    let wasDisconnected = false;
+
+    return subscribeToJobsEvents({
+      onOpen: () => {
+        setSocketStatus("connected");
+        if (wasDisconnected) {
+          wasDisconnected = false;
+          void queryClient.invalidateQueries({ queryKey: ["jobs", "running"] });
+        }
+      },
+      onError: () => {
+        wasDisconnected = true;
+        setSocketStatus("error");
+      },
+      onClose: () => {
+        wasDisconnected = true;
+        setSocketStatus("disconnected");
+      },
+      onMessage: (payload: JobEventPayload) => {
+        queryClient.setQueryData<JobListResponse | undefined>(
+          ["jobs", "running"],
+          (current) => applyJobEventToRunningJobs(current, payload),
+        );
+      },
+    });
+  }, [queryClient]);
+
+  useEffect(() => {
     if (selectedJobId === null) {
-      setSocketStatus("idle");
       return undefined;
     }
 
     return subscribeToJobEvents(selectedJobId, {
-      onOpen: () => setSocketStatus("connected"),
-      onError: () => setSocketStatus("error"),
-      onClose: () => setSocketStatus("disconnected"),
       onMessage: (payload: JobEventPayload) => {
         if (payload.job) {
           queryClient.setQueryData(["job", selectedJobId], payload.job);
         }
-        void queryClient.invalidateQueries({ queryKey: ["jobs", "running"] });
       },
     });
   }, [queryClient, selectedJobId]);
