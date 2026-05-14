@@ -4,13 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.entities import JobStatus
-from app.schemas.jobs import JobResponse
+from app.schemas.jobs import JobResponse, WhisperModelName
 
 
 class VideoCollectionCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", min_length=2, max_length=8)
     target_language: str = Field(default="vi", min_length=2, max_length=8)
+    model_name: WhisperModelName = "medium"
     translation_context: Optional[str] = Field(default=None, max_length=100)
     voice_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     output_video_speed: float = Field(default=1.0, gt=0, le=4)
@@ -33,6 +34,7 @@ class VideoCollectionResponse(BaseModel):
     original_filename: Optional[str] = None
     source_language: str
     target_language: str
+    model_name: str
     translation_context: Optional[str] = None
     voice_id: Optional[str] = None
     output_video_speed: float

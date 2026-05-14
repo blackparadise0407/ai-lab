@@ -9,7 +9,11 @@ import {
 } from "../../constants/languages";
 import { getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
-import type { JobEventPayload, JobListResponse } from "../../interfaces/job";
+import type {
+  JobEventPayload,
+  JobListResponse,
+  WhisperModelName,
+} from "../../interfaces/job";
 import {
   apiBaseUrl,
   createVideoCollection,
@@ -44,13 +48,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { JobStatusCard } from "./job-detail-ui";
 
 const defaultVoiceValue = "__provider_default__";
+const whisperModelOptions: Array<{ value: WhisperModelName; label: string }> = [
+  { value: "tiny", label: "Tiny" },
+  { value: "base", label: "Base" },
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large-v3", label: "Large" },
+  { value: "turbo", label: "Turbo" },
+];
 
 type CreateVideoCollectionFormValues = {
   sourceLanguage: string;
   targetLanguage: string;
+  modelName: WhisperModelName;
   translationContext: string;
   voiceId: string;
   outputVideoSpeed: number;
@@ -71,6 +85,7 @@ export default function DashboardPage() {
     defaultValues: {
       sourceLanguage: "zh",
       targetLanguage: DEFAULT_TARGET_LANGUAGE_CODE,
+      modelName: "medium",
       translationContext: "",
       voiceId: "",
       outputVideoSpeed: 1,
@@ -200,6 +215,7 @@ export default function DashboardPage() {
       const collection = await createVideoCollection({
         source_language: values.sourceLanguage,
         target_language: values.targetLanguage,
+        model_name: values.modelName,
         translation_context: trimmedTranslationContext || null,
         title: file.name,
         voice_id: values.voiceId || null,
@@ -386,6 +402,33 @@ export default function DashboardPage() {
                     </Select>
                   )}
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label>Model</Label>
+                <Controller
+                  control={control}
+                  name="modelName"
+                  render={({ field }) => (
+                    <Tabs
+                      value={field.value}
+                      onValueChange={(value: string) =>
+                        field.onChange(value as WhisperModelName)
+                      }
+                    >
+                      <TabsList className="grid h-auto w-full grid-cols-3 sm:grid-cols-6">
+                        {whisperModelOptions.map((model) => (
+                          <TabsTrigger key={model.value} value={model.value}>
+                            {model.label}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </Tabs>
+                  )}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Selects the Whisper transcription model for this collection;
+                  medium is the default balance of quality and speed.
+                </p>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">

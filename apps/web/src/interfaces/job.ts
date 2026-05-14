@@ -8,6 +8,14 @@ export type JobStatus =
   | "failed"
   | "canceled";
 
+export type WhisperModelName =
+  | "tiny"
+  | "base"
+  | "small"
+  | "medium"
+  | "large-v3"
+  | "turbo";
+
 export interface JobListResponse {
   items: Job[];
   total: number;
@@ -20,6 +28,7 @@ export interface Job {
   external_job_id: string;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
@@ -131,6 +140,7 @@ export interface VideoCollection {
   original_filename?: string | null;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
@@ -161,6 +171,7 @@ export interface VideoCollectionCreateRequest {
   title?: string | null;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed?: number;
