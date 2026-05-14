@@ -9,6 +9,7 @@ import type {
 } from "../../interfaces/job";
 import { formatDate, getErrorMessage } from "../../lib/format";
 import { useErrorToast } from "../../hooks/useErrorToast";
+import { Confirm } from "../common/Confirm";
 import { EmptyState } from "../common/EmptyState";
 import { PageHeader } from "../common/PageHeader";
 import { Badge } from "../ui/badge";
@@ -174,24 +175,27 @@ export function VideosDraft({
                             </Button>
                           );
                         })}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
-                          onClick={() => {
-                            if (window.confirm("Delete this collection, all chunk jobs, and local artifact files?")) {
-                              onDeleteCollection(collection.id);
-                            }
-                          }}
+                        <Confirm
+                          title="Delete collection?"
+                          description="Delete this collection, all chunk jobs, and local artifact files?"
+                          confirmLabel="Delete"
+                          confirmVariant="destructive"
+                          onConfirm={() => onDeleteCollection(collection.id)}
                         >
-                          {pendingDeleteCollectionId === collection.id ? (
-                            <Loader2 className="animate-spin" />
-                          ) : (
-                            <Trash2 />
-                          )}
-                          Delete collection
-                        </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
+                          >
+                            {pendingDeleteCollectionId === collection.id ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <Trash2 />
+                            )}
+                            Delete collection
+                          </Button>
+                        </Confirm>
                       </div>
                     </div>
 
@@ -268,24 +272,27 @@ export function VideosDraft({
                                           </Button>
                                         );
                                       })}
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="destructive"
-                                        disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
-                                        onClick={() => {
-                                          if (window.confirm("Delete this chunk job and its local artifact files?")) {
-                                            onDeleteJob(collection.id, segment.job_id);
-                                          }
-                                        }}
+                                      <Confirm
+                                        title="Delete chunk job?"
+                                        description="Delete this chunk job and its local artifact files?"
+                                        confirmLabel="Delete"
+                                        confirmVariant="destructive"
+                                        onConfirm={() => onDeleteJob(collection.id, segment.job_id)}
                                       >
-                                        {pendingDeleteJobId === segment.job_id ? (
-                                          <Loader2 className="animate-spin" />
-                                        ) : (
-                                          <Trash2 />
-                                        )}
-                                        Delete
-                                      </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="destructive"
+                                          disabled={pendingDeleteCollectionId !== null || pendingDeleteJobId !== null}
+                                        >
+                                          {pendingDeleteJobId === segment.job_id ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Trash2 />
+                                          )}
+                                          Delete
+                                        </Button>
+                                      </Confirm>
                                     </div>
                                   </td>
                                 </tr>
