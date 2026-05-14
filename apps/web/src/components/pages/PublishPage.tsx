@@ -360,7 +360,7 @@ export default function PublishPage() {
         description="Publish completed videos from source collections. Long uploads stay grouped as collections while each completed segment is uploaded as its own platform video."
       />
 
-      <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -398,7 +398,7 @@ export default function PublishPage() {
                 key={option.value}
                 type="button"
                 className={cn(
-                  "rounded-2xl border bg-slate-50 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                  "rounded-2xl border bg-muted/60 p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
                   platform === option.value &&
                     "border-primary bg-primary/10 ring-2 ring-primary/20",
                 )}
@@ -462,7 +462,7 @@ export default function PublishPage() {
         />
       )}
 
-      <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -515,7 +515,7 @@ export default function PublishPage() {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-3 rounded-2xl border bg-white/80 p-4 text-sm text-muted-foreground shadow-xl shadow-slate-900/5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border bg-card/80 p-4 text-sm text-muted-foreground shadow-xl shadow-slate-900/5 sm:flex-row sm:items-center sm:justify-between">
         <span>
           Showing{" "}
           {collections.length === 0
@@ -635,7 +635,7 @@ function CollectionPublishCard({
   return (
     <article
       className={cn(
-        "rounded-2xl border bg-white p-4",
+        "rounded-2xl border bg-card p-4",
         isSelected && "border-primary ring-2 ring-primary/20",
       )}
     >
@@ -695,7 +695,7 @@ function CollectionPublishCard({
 
       <div className="mt-4 overflow-x-auto rounded-2xl border">
         <table className="w-full min-w-[58rem] text-left text-sm">
-          <thead className="bg-slate-50 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
+          <thead className="bg-muted/60 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Part</th>
               <th className="px-4 py-3">Time range</th>
@@ -705,7 +705,7 @@ function CollectionPublishCard({
               <th className="px-4 py-3 text-right">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y bg-white">
+          <tbody className="divide-y bg-card">
             {row.segments.length > 0 ? (
               row.segments.map((segment) => {
                 const isPending =
@@ -793,7 +793,7 @@ function DirectJobCard({
   title: string;
 }) {
   return (
-    <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+    <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
       <CardHeader>
         <div>
           <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">

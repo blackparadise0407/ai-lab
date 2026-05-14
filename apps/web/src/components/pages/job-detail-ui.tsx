@@ -77,7 +77,7 @@ export function JobStatusCard({ job }: { job: Job | null }) {
   }, [job]);
 
   return (
-    <Card className="mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+    <Card className="mb-6 bg-card/90 shadow-xl shadow-slate-900/5">
       <CardHeader>
         <div>
           <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -131,7 +131,7 @@ export function JobStatusCard({ job }: { job: Job | null }) {
                 <li
                   key={status}
                   className={cn(
-                    "flex items-center gap-3 rounded-xl border bg-slate-50 p-3 text-sm font-bold text-muted-foreground",
+                    "flex items-center gap-3 rounded-xl border bg-muted/60 p-3 text-sm font-bold text-muted-foreground",
                     index <= activeStepIndex &&
                       "border-primary/20 bg-primary/10 text-primary",
                   )}
@@ -166,7 +166,7 @@ export function DataPanel({
   children: ReactNode;
 }) {
   return (
-    <Card className="max-h-[34rem] min-h-72 bg-white/90 shadow-xl shadow-slate-900/5">
+    <Card className="max-h-[34rem] min-h-72 bg-card/90 shadow-xl shadow-slate-900/5">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardAction>
@@ -189,7 +189,7 @@ export function ArtifactRow({ artifact }: { artifact: Artifact }) {
   const previewUrl = getArtifactPreviewUrl(artifact);
 
   return (
-    <article className="flex flex-col gap-4 rounded-2xl border bg-slate-50 p-4">
+    <article className="flex flex-col gap-4 rounded-2xl border bg-muted/60 p-4">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <strong>{artifact.artifact_type}</strong>
@@ -272,7 +272,7 @@ export function ArtifactPreview({
 
   return (
     <iframe
-      className="h-96 w-full rounded-xl border bg-white"
+      className="h-96 w-full rounded-xl border bg-card"
       src={previewUrl}
       title={`${artifact.artifact_type} preview`}
     />
@@ -281,7 +281,7 @@ export function ArtifactPreview({
 
 export function ProviderRequestRow({ request }: { request: ProviderRequest }) {
   return (
-    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-slate-50 p-4 sm:flex-row sm:items-center">
+    <article className="flex flex-col justify-between gap-4 rounded-2xl border bg-muted/60 p-4 sm:flex-row sm:items-center">
       <div>
         <strong>{request.provider_name}</strong>
         <p className="mt-1 break-all text-sm text-muted-foreground">

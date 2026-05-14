@@ -173,7 +173,7 @@ export default function JobDetailPage() {
         description="Inspect pipeline status, generated artifacts, provider callbacks, and operational controls for one dubbing job."
       />
 
-      <Card className="mt-8 mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="mt-8 mb-6 bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
