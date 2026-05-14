@@ -297,7 +297,7 @@ export default function DashboardPage() {
             <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
               AI-powered SaaS operations
             </p>
-            <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
+            <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-foreground sm:text-7xl lg:text-8xl">
               AI Lab Command Center
             </h1>
             <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
@@ -306,9 +306,9 @@ export default function DashboardPage() {
               clean enterprise workflow.
             </p>
             <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-muted-foreground">
-              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">Real-time jobs</span>
-              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">AI dubbing</span>
-              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">Multi-channel publishing</span>
+              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">Real-time jobs</span>
+              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">AI dubbing</span>
+              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">Multi-channel publishing</span>
             </div>
           </div>
           <Card className="border-primary/10 bg-slate-950 text-white shadow-2xl shadow-slate-950/20">
