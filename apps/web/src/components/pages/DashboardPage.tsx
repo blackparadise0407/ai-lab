@@ -742,11 +742,18 @@ export default function DashboardPage() {
                           },
                         })}
                       />
-                      {!!duration && (
+                      {!!duration ? (
                         <p className="text-xs text-muted-foreground">
                           Current video duration is ~{duration.toFixed(2)}{" "}
-                          seconds. Expected chunks:{" "}
+                          seconds.,
+                          <br />
+                          Expected chunks:{" "}
                           {Math.ceil(duration / splitThresholdSeconds)}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Source videos longer than this are split into chunks;
+                          default is 60 seconds.
                         </p>
                       )}
                     </div>
