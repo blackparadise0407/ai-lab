@@ -1,12 +1,12 @@
 export type JobStatus =
-  | 'created'
-  | 'uploaded'
-  | 'processing'
-  | 'waiting_provider'
-  | 'finalizing'
-  | 'completed'
-  | 'failed'
-  | 'canceled';
+  | "created"
+  | "uploaded"
+  | "processing"
+  | "waiting_provider"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "canceled";
 
 export interface JobListResponse {
   items: Job[];
@@ -55,7 +55,7 @@ export interface ProviderRequest {
   updated_at: string;
 }
 
-export type UploadPlatform = 'youtube' | 'facebook' | 'tiktok';
+export type UploadPlatform = "youtube" | "facebook" | "tiktok";
 
 export interface ConnectedAccount {
   id: number;
@@ -87,6 +87,12 @@ export interface PublishUploadResponse {
 export interface JobEventPayload {
   event: string;
   job?: Job;
+  items?: Job[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  status?: JobStatus;
+  updated_at?: string;
   artifacts?: Artifact[];
   provider_requests?: ProviderRequest[];
   job_id?: number;
