@@ -290,37 +290,46 @@ export default function DashboardPage() {
 
   return (
     <>
-      <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
-        <div>
-          <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
-            AI Lab Dubbing Pipeline
-          </p>
-          <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
-            AI Lab
-          </h1>
-          <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-            Create a video collection, upload source video, and watch websocket
-            status updates while the pipeline runs in the background.
-          </p>
-        </div>
-        <Card className="border-primary/10 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur">
-          <CardHeader>
-            <CardDescription>Connected API</CardDescription>
-            <CardTitle className="break-all text-lg">{apiBaseUrl}</CardTitle>
-            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              {socketStatus === "connected" ? (
-                <PlugZap className="size-4 text-emerald-600" />
-              ) : (
-                <Plug className="size-4" />
-              )}
-              <span>Websocket {socketStatus}</span>
+      <section className="relative mb-8 overflow-hidden rounded-[2rem] border bg-card/80 p-6 shadow-2xl shadow-slate-950/5 backdrop-blur sm:p-8 lg:p-10">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_32%)]" />
+        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
+              AI-powered SaaS operations
+            </p>
+            <h1 className="mt-3 max-w-5xl text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
+              AI Lab Command Center
+            </h1>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
+              Create production-ready short video collections, monitor live AI
+              dubbing pipelines, and move from source upload to publish with a
+              clean enterprise workflow.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-muted-foreground">
+              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">Real-time jobs</span>
+              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">AI dubbing</span>
+              <span className="rounded-full border bg-white/70 px-4 py-2 shadow-sm">Multi-channel publishing</span>
             </div>
-          </CardHeader>
-        </Card>
+          </div>
+          <Card className="border-primary/10 bg-slate-950 text-white shadow-2xl shadow-slate-950/20">
+            <CardHeader>
+              <CardDescription className="text-cyan-200">Connected API</CardDescription>
+              <CardTitle className="break-all text-lg text-white">{apiBaseUrl}</CardTitle>
+              <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+                {socketStatus === "connected" ? (
+                  <PlugZap className="size-4 text-emerald-300" />
+                ) : (
+                  <Plug className="size-4" />
+                )}
+                <span>Websocket {socketStatus}</span>
+              </div>
+            </CardHeader>
+          </Card>
+        </div>
       </section>
 
       <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,42rem)]">
-        <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+        <Card>
           <CardHeader className="grid-cols-[auto_1fr] items-center">
             <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-lg font-black text-primary">
               1
