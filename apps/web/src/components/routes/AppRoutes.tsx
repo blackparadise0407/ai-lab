@@ -5,6 +5,7 @@ import { EmptyState } from "../common/EmptyState";
 
 const DashboardPage = lazy(() => import("../pages/DashboardPage"));
 const ConnectorPage = lazy(() => import("../pages/ConnectorPage"));
+const EditorPage = lazy(() => import("../pages/EditorPage"));
 const JobsPage = lazy(() => import("../pages/JobsPage"));
 const JobDetailPage = lazy(() => import("../pages/JobDetailPage"));
 const PublishPage = lazy(() => import("../pages/PublishPage"));
@@ -16,6 +17,7 @@ export function AppRoutes() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/connector" element={<ConnectorPage />} />
+        <Route path="/editor" element={<EditorPage />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs/:jobId" element={<JobDetailPage />} />
         <Route path="/publish" element={<PublishPage />} />

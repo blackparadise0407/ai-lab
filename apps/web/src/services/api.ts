@@ -11,6 +11,9 @@ import type {
   VideoCollectionCreateRequest,
   VideoCollectionDetail,
   VideoCollectionListResponse,
+  VideoCollectionRender,
+  VideoCollectionRenderCreateRequest,
+  VideoCollectionRenderListResponse,
   VideoSegment,
   WhisperModelName,
 } from '../interfaces/job';
@@ -280,4 +283,40 @@ export function getArtifactPreviewUrl(artifact: Artifact) {
   }
 
   return `${apiBaseUrl}/v1/artifacts/${artifact.id}/preview`;
+}
+
+
+export async function getVideoCollectionRenders(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/renders`);
+  return parseJsonResponse<VideoCollectionRenderListResponse>(response);
+}
+
+export async function createVideoCollectionRender(
+  collectionId: number,
+  payload: VideoCollectionRenderCreateRequest = {},
+) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/renders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  return parseJsonResponse<VideoCollectionRender>(response);
+}
+
+export async function publishVideoCollectionRender(
+  collectionId: number,
+  renderId: number,
+  payload: PublishUploadRequest,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/v1/video-collections/${collectionId}/renders/${renderId}/uploads`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return parseJsonResponse<VideoCollectionRender>(response);
 }
