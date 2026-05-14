@@ -297,7 +297,7 @@ export default function DashboardPage() {
             <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
               AI-powered SaaS operations
             </p>
-            <h1 className="mt-3 text-5xl font-black leading-none tracking-[-0.07em] text-slate-950 sm:text-7xl lg:text-8xl">
+            <h1 className="mt-3 text-5xl font-black leading-none tracking-[-0.07em] text-foreground sm:text-7xl lg:text-8xl">
               AI Lab
             </h1>
             <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
