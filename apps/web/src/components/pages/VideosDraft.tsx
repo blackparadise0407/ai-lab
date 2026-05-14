@@ -89,7 +89,7 @@ export function VideosDraft({
         description="Manage each uploaded source video as a collection. Videos over 60 seconds are displayed as ordered chunks so each segment can be processed and published without losing the original grouping."
       />
 
-      <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -116,7 +116,7 @@ export function VideosDraft({
                   .map((segment) => segment.job_id);
 
                 return (
-                  <article key={collection.id} className="rounded-2xl border bg-white p-4">
+                  <article key={collection.id} className="rounded-2xl border bg-card p-4">
                     <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr_auto] lg:items-start">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -197,7 +197,7 @@ export function VideosDraft({
 
                     <div className="mt-4 overflow-x-auto rounded-2xl border">
                       <table className="w-full min-w-[64rem] text-left text-sm">
-                        <thead className="bg-slate-50 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
+                        <thead className="bg-muted/60 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
                           <tr>
                             <th className="px-4 py-3">Chunk</th>
                             <th className="px-4 py-3">Time range</th>
@@ -207,7 +207,7 @@ export function VideosDraft({
                             <th className="px-4 py-3 text-right">Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y bg-white">
+                        <tbody className="divide-y bg-card">
                           {segments.length > 0 ? (
                             segments.map((segment) => {
                               const publishStatuses = getPublishStatuses(
@@ -313,7 +313,7 @@ export function VideosDraft({
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-3 rounded-2xl border bg-white/80 p-4 text-sm text-muted-foreground shadow-xl shadow-slate-900/5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border bg-card/80 p-4 text-sm text-muted-foreground shadow-xl shadow-slate-900/5 sm:flex-row sm:items-center sm:justify-between">
         <span>
           Showing {collections.length === 0 ? 0 : page * pageSize + 1}–
           {Math.min((page + 1) * pageSize, total)} of {total} collections

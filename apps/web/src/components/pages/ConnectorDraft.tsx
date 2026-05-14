@@ -107,7 +107,7 @@ export function ConnectorDraft({ apiBaseUrl }: { apiBaseUrl: string }) {
         description="Connect and manage upload provider accounts outside the job dashboard, then use those providers when publishing completed videos."
       />
 
-      <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <CardDescription>Connected API</CardDescription>
           <CardTitle className="break-all text-lg">{apiBaseUrl}</CardTitle>
@@ -118,7 +118,7 @@ export function ConnectorDraft({ apiBaseUrl }: { apiBaseUrl: string }) {
         </CardContent>
       </Card>
 
-      <Card className="bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -193,7 +193,7 @@ export function ConnectorDraft({ apiBaseUrl }: { apiBaseUrl: string }) {
             )}
           </div>
 
-          <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border bg-muted/60 p-4 text-sm text-muted-foreground">
             Finished processing a video? Go to{" "}
             <Link
               className={buttonVariants({ variant: "link", size: "sm" })}
@@ -223,7 +223,7 @@ function ConnectedAccountRow({
   onSelect: () => void;
 }) {
   return (
-    <label className="flex cursor-pointer flex-col gap-3 rounded-xl border bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+    <label className="flex cursor-pointer flex-col gap-3 rounded-xl border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
       <span className="flex items-start gap-3">
         <input
           className="mt-1"

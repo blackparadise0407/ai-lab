@@ -3,6 +3,7 @@ import { BriefcaseBusiness, LayoutDashboard, Plug, UploadCloud, Video } from "lu
 import { NavLink } from "react-router-dom";
 
 import { cn } from "../../lib/utils";
+import { ThemeToggle } from "../common/ThemeToggle";
 import { Badge } from "../ui/badge";
 
 const navigationItems: {
@@ -38,9 +39,12 @@ export function Sidebar() {
             </div>
           </div>
         </div>
-        <Badge variant="secondary" className="border-white/10 bg-white/10 text-cyan-100 lg:mt-5">
-          AI SaaS
-        </Badge>
+        <div className="flex items-center gap-2 lg:mt-5 lg:flex-col lg:items-stretch">
+          <Badge variant="secondary" className="border-white/10 bg-white/10 text-cyan-100">
+            AI SaaS
+          </Badge>
+          <ThemeToggle />
+        </div>
       </div>
 
       <nav className="relative mt-5 flex gap-2 overflow-x-auto lg:grid lg:gap-2 lg:overflow-visible">
