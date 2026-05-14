@@ -306,365 +306,429 @@ export default function DashboardPage() {
 
   return (
     <>
-      <section className="relative mb-8 overflow-hidden rounded-[2rem] border bg-card/80 p-6 shadow-2xl shadow-slate-950/5 backdrop-blur sm:p-8 lg:p-10">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_32%)]" />
-        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.24em] text-primary">
-              AI-powered SaaS operations
-            </p>
-            <h1 className="mt-3 text-5xl font-black leading-none tracking-[-0.07em] text-foreground sm:text-7xl lg:text-8xl">
-              AI Lab
-            </h1>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-              Create production-ready short video collections, monitor live AI
-              dubbing pipelines, and move from source upload to publish with a
-              clean enterprise workflow.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-muted-foreground">
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">
-                Real-time jobs
-              </span>
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">
-                AI dubbing
-              </span>
-              <span className="rounded-full border bg-card/70 px-4 py-2 shadow-sm">
-                Multi-channel publishing
-              </span>
-            </div>
-          </div>
-          <Card className="border-primary/10 bg-slate-950 text-white shadow-2xl shadow-slate-950/20">
-            <CardHeader>
-              <CardDescription className="text-cyan-200">
-                Connected API
-              </CardDescription>
-              <CardTitle className="break-all text-lg text-white">
-                {apiBaseUrl}
-              </CardTitle>
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
-                {socketStatus === "connected" ? (
-                  <PlugZap className="size-4 text-emerald-300" />
-                ) : (
-                  <Plug className="size-4" />
-                )}
-                <span>Websocket {socketStatus}</span>
-              </div>
-            </CardHeader>
-          </Card>
+      <section className="mb-6 flex flex-col gap-4 rounded-2xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-black tracking-tight text-foreground sm:text-3xl">
+            Create video collection
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Upload a source video and configure dubbing settings.
+          </p>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 rounded-full border bg-muted/40 px-3 py-2 text-xs text-muted-foreground sm:max-w-md">
+          {socketStatus === "connected" ? (
+            <PlugZap className="size-4 shrink-0 text-emerald-500" />
+          ) : (
+            <Plug className="size-4 shrink-0" />
+          )}
+          <span className="min-w-0 truncate font-medium text-foreground">
+            {apiBaseUrl}
+          </span>
+          <span className="shrink-0 capitalize">WebSocket {socketStatus}</span>
         </div>
       </section>
 
-      <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,42rem)]">
-        <Card>
-          <CardHeader className="grid-cols-[auto_1fr] items-center">
-            <CardTitle>Create video collection</CardTitle>
+      <section
+        className={`mb-6 grid gap-6 ${
+          job ? "xl:grid-cols-[minmax(0,1fr)_24rem]" : ""
+        }`}
+      >
+        <Card className="shadow-sm">
+          <CardHeader className="border-b">
+            <CardTitle>Collection setup</CardTitle>
+            <CardDescription>
+              Defaults match the current ZH → VI dubbing workflow.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             <form
-              className="grid gap-4"
+              className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-start"
               onSubmit={handleSubmit(handleCreateAndUpload)}
             >
-              <div className="grid gap-2">
-                <Label htmlFor="source-language">Source language</Label>
-                <Input
-                  id="source-language"
-                  {...register("sourceLanguage", {
-                    required: "Source language is required.",
-                  })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="target-language">Target language</Label>
-                <Controller
-                  control={control}
-                  name="targetLanguage"
-                  rules={{ required: "Target language is required." }}
-                  render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={(value) => {
-                        field.onChange(value);
-                        setValue("voiceId", "");
-                      }}
-                    >
-                      <SelectTrigger id="target-language">
-                        <SelectValue placeholder="Select target language" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {targetLanguages.map((language) => (
-                          <SelectItem key={language.code} value={language.code}>
-                            {language.name} ({language.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Model</Label>
-                <Controller
-                  control={control}
-                  name="modelName"
-                  render={({ field }) => (
-                    <Tabs
-                      value={field.value}
-                      onValueChange={(value: string) =>
-                        field.onChange(value as WhisperModelName)
-                      }
-                    >
-                      <TabsList className="grid h-auto w-full grid-cols-3 sm:grid-cols-6">
-                        {whisperModelOptions.map((model) => (
-                          <TabsTrigger key={model.value} value={model.value}>
-                            {model.label}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </Tabs>
-                  )}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Selects the Whisper transcription model for this collection;
-                  medium is the default balance of quality and speed.
-                </p>
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="translation-context">
-                    Translation context
-                  </Label>
-                  <span className="text-xs text-muted-foreground">
-                    {translationContext.length}/100
-                  </span>
-                </div>
-                <Input
-                  id="translation-context"
-                  maxLength={100}
-                  placeholder="Optional: names, tone, topic"
-                  {...register("translationContext", {
-                    maxLength: {
-                      value: 100,
-                      message:
-                        "Translation context must be 100 characters or fewer.",
-                    },
-                  })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Added to the translation prompt to preserve wording, tone, and
-                  names.
-                </p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="voice-id">Voice</Label>
-                <Controller
-                  control={control}
-                  name="voiceId"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value || defaultVoiceValue}
-                      disabled={voicesQuery.isLoading}
-                      onValueChange={(value) =>
-                        field.onChange(value === defaultVoiceValue ? "" : value)
-                      }
-                    >
-                      <SelectTrigger id="voice-id">
-                        <SelectValue placeholder="Default provider voice" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={defaultVoiceValue}>
-                          Default provider voice
-                        </SelectItem>
-                        {voices.map((voice) => (
-                          <SelectItem
-                            key={voice.voice_id}
-                            value={voice.voice_id}
-                          >
-                            {voice.credit_factor && voice.credit_factor > 1 ? (
-                              <>
-                                {voice.name}
-                                <Badge variant="secondary">
-                                  x{voice.credit_factor}
-                                </Badge>
-                              </>
-                            ) : (
-                              voice.name
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {selectedVoice && (
-                  <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    <div className="flex flex-wrap gap-x-3 gap-y-1">
-                      <span className="font-medium text-foreground">
-                        {selectedVoice.name}
-                      </span>
-                      <span className="break-all">
-                        Code: {selectedVoice.voice_id}
-                      </span>
-                      {selectedVoice.credit_factor &&
-                      selectedVoice.credit_factor > 1 ? (
-                        <span>
-                          Credit factor: x{selectedVoice.credit_factor}
-                        </span>
-                      ) : null}
-                    </div>
-                    {selectedVoice.demo ? (
-                      <audio
-                        className="h-9 w-full"
-                        controls
-                        preload="none"
-                        src={selectedVoice.demo}
-                      >
-                        <a
-                          href={selectedVoice.demo}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open voice demo
-                        </a>
-                      </audio>
-                    ) : (
-                      <span>No demo preview is available for this voice.</span>
-                    )}
+              <div className="grid gap-6">
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                      Language
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Choose the source and translated language pair.
+                    </p>
                   </div>
-                )}
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>
-                    {voicesQuery.isLoading
-                      ? "Loading provider voices…"
-                      : voicesQuery.isError
-                        ? "Unable to load provider voices; default voice will be used."
-                        : `${voices.length} provider voices available${
-                            voicesQuery.data?.cached ? " from cache" : ""
-                          }.`}
-                  </span>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="source-language">Source language</Label>
+                      <Input
+                        id="source-language"
+                        {...register("sourceLanguage", {
+                          required: "Source language is required.",
+                        })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="target-language">Target language</Label>
+                      <Controller
+                        control={control}
+                        name="targetLanguage"
+                        rules={{ required: "Target language is required." }}
+                        render={({ field }) => (
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => {
+                              field.onChange(value);
+                              setValue("voiceId", "");
+                            }}
+                          >
+                            <SelectTrigger id="target-language">
+                              <SelectValue placeholder="Select target language" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {targetLanguages.map((language) => (
+                                <SelectItem
+                                  key={language.code}
+                                  value={language.code}
+                                >
+                                  {language.name} ({language.code})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                      Transcription
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Tune recognition quality and translation context.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Model</Label>
+                    <Controller
+                      control={control}
+                      name="modelName"
+                      render={({ field }) => (
+                        <Tabs
+                          value={field.value}
+                          onValueChange={(value: string) =>
+                            field.onChange(value as WhisperModelName)
+                          }
+                        >
+                          <TabsList className="grid h-auto w-full grid-cols-3 sm:grid-cols-6">
+                            {whisperModelOptions.map((model) => (
+                              <TabsTrigger
+                                key={model.value}
+                                value={model.value}
+                              >
+                                {model.label}
+                              </TabsTrigger>
+                            ))}
+                          </TabsList>
+                        </Tabs>
+                      )}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Selects the Whisper transcription model for this
+                      collection; medium is the default balance of quality and
+                      speed.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="translation-context">
+                        Translation context
+                      </Label>
+                      <span className="text-xs text-muted-foreground">
+                        {translationContext.length}/100
+                      </span>
+                    </div>
+                    <Input
+                      id="translation-context"
+                      maxLength={100}
+                      placeholder="Optional: names, tone, topic"
+                      {...register("translationContext", {
+                        maxLength: {
+                          value: 100,
+                          message:
+                            "Translation context must be 100 characters or fewer.",
+                        },
+                      })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Added to the translation prompt to preserve wording, tone,
+                      and names.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                      Upload
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Select the source file and start the collection job.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="source-video">Source video</Label>
+                    <Input
+                      id="source-video"
+                      type="file"
+                      accept="video/*"
+                      {...register("sourceVideo", {
+                        required:
+                          "Choose a source video before creating a collection.",
+                      })}
+                    />
+                  </div>
                   <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    disabled={
-                      voicesQuery.isFetching || refreshVoicesMutation.isPending
-                    }
-                    onClick={() => refreshVoicesMutation.mutate()}
+                    type="submit"
+                    size="lg"
+                    className="w-full sm:w-auto"
+                    disabled={createAndUploadMutation.isPending}
                   >
-                    {(voicesQuery.isFetching ||
-                      refreshVoicesMutation.isPending) && (
+                    {createAndUploadMutation.isPending && (
                       <Loader2 className="animate-spin" />
                     )}
-                    Refresh voices
+                    {createAndUploadMutation.isPending
+                      ? "Creating and uploading…"
+                      : "Create collection and upload video"}
                   </Button>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 items-start">
-                <div className="grid gap-2">
-                  <Label htmlFor="output-video-speed">Output video speed</Label>
-                  <Input
-                    id="output-video-speed"
-                    type="number"
-                    min="0.1"
-                    max="4"
-                    step="0.05"
-                    {...register("outputVideoSpeed", {
-                      valueAsNumber: true,
-                      min: {
-                        value: 0.1,
-                        message: "Output video speed must be greater than 0.",
-                      },
-                      max: {
-                        value: 4,
-                        message: "Output video speed must be no more than 4.",
-                      },
-                    })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Applied only during final muxing; default is 1x.
-                  </p>
+
+              <div className="grid gap-6">
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                      Voice
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Pick a provider voice or keep the default.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="voice-id">Voice</Label>
+                    <Controller
+                      control={control}
+                      name="voiceId"
+                      render={({ field }) => (
+                        <Select
+                          value={field.value || defaultVoiceValue}
+                          disabled={voicesQuery.isLoading}
+                          onValueChange={(value) =>
+                            field.onChange(
+                              value === defaultVoiceValue ? "" : value,
+                            )
+                          }
+                        >
+                          <SelectTrigger id="voice-id">
+                            <SelectValue placeholder="Default provider voice" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={defaultVoiceValue}>
+                              Default provider voice
+                            </SelectItem>
+                            {voices.map((voice) => (
+                              <SelectItem
+                                key={voice.voice_id}
+                                value={voice.voice_id}
+                              >
+                                {voice.credit_factor &&
+                                voice.credit_factor > 1 ? (
+                                  <>
+                                    {voice.name}
+                                    <Badge variant="secondary">
+                                      x{voice.credit_factor}
+                                    </Badge>
+                                  </>
+                                ) : (
+                                  voice.name
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {selectedVoice && (
+                      <div className="grid gap-2 rounded-lg border bg-background p-3 text-xs text-muted-foreground">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                          <span className="font-medium text-foreground">
+                            {selectedVoice.name}
+                          </span>
+                          <span className="break-all">
+                            Code: {selectedVoice.voice_id}
+                          </span>
+                          {selectedVoice.credit_factor &&
+                          selectedVoice.credit_factor > 1 ? (
+                            <span>
+                              Credit factor: x{selectedVoice.credit_factor}
+                            </span>
+                          ) : null}
+                        </div>
+                        {selectedVoice.demo ? (
+                          <audio
+                            className="h-9 w-full"
+                            controls
+                            preload="none"
+                            src={selectedVoice.demo}
+                          >
+                            <a
+                              href={selectedVoice.demo}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open voice demo
+                            </a>
+                          </audio>
+                        ) : (
+                          <span>
+                            No demo preview is available for this voice.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        {voicesQuery.isLoading
+                          ? "Loading provider voices…"
+                          : voicesQuery.isError
+                            ? "Unable to load provider voices; default voice will be used."
+                            : `${voices.length} provider voices available${
+                                voicesQuery.data?.cached ? " from cache" : ""
+                              }.`}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        disabled={
+                          voicesQuery.isFetching ||
+                          refreshVoicesMutation.isPending
+                        }
+                        onClick={() => refreshVoicesMutation.mutate()}
+                      >
+                        {(voicesQuery.isFetching ||
+                          refreshVoicesMutation.isPending) && (
+                          <Loader2 className="animate-spin" />
+                        )}
+                        Refresh voices
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="original-audio-volume">
-                    Original audio volume
-                  </Label>
-                  <Input
-                    id="original-audio-volume"
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    {...register("originalAudioVolume", {
-                      valueAsNumber: true,
-                      min: {
-                        value: 0,
-                        message: "Original audio volume must be at least 0.",
-                      },
-                      max: {
-                        value: 1,
-                        message:
-                          "Original audio volume must be no more than 1.",
-                      },
-                    })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Mixed under the dub at the final step; default is 0.15.
-                  </p>
+
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                      Output settings
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Adjust muxing speed, original audio, and chunking.
+                    </p>
+                  </div>
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="output-video-speed">
+                        Output video speed
+                      </Label>
+                      <Input
+                        id="output-video-speed"
+                        type="number"
+                        min="0.1"
+                        max="4"
+                        step="0.05"
+                        {...register("outputVideoSpeed", {
+                          valueAsNumber: true,
+                          min: {
+                            value: 0.1,
+                            message:
+                              "Output video speed must be greater than 0.",
+                          },
+                          max: {
+                            value: 4,
+                            message:
+                              "Output video speed must be no more than 4.",
+                          },
+                        })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Applied only during final muxing; default is 1x.
+                      </p>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="original-audio-volume">
+                        Original audio volume
+                      </Label>
+                      <Input
+                        id="original-audio-volume"
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        {...register("originalAudioVolume", {
+                          valueAsNumber: true,
+                          min: {
+                            value: 0,
+                            message:
+                              "Original audio volume must be at least 0.",
+                          },
+                          max: {
+                            value: 1,
+                            message:
+                              "Original audio volume must be no more than 1.",
+                          },
+                        })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Mixed under the dub at the final step; default is 0.15.
+                      </p>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="split-threshold-seconds">
+                        Split threshold seconds
+                      </Label>
+                      <Input
+                        id="split-threshold-seconds"
+                        type="number"
+                        min="1"
+                        step="1"
+                        {...register("splitThresholdSeconds", {
+                          valueAsNumber: true,
+                          min: {
+                            value: 1,
+                            message:
+                              "Split threshold must be greater than 0 seconds.",
+                          },
+                        })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Source videos longer than this are split into chunks;
+                        default is 60 seconds.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="split-threshold-seconds">
-                  Split threshold seconds
-                </Label>
-                <Input
-                  id="split-threshold-seconds"
-                  type="number"
-                  min="1"
-                  step="1"
-                  {...register("splitThresholdSeconds", {
-                    valueAsNumber: true,
-                    min: {
-                      value: 1,
-                      message:
-                        "Split threshold must be greater than 0 seconds.",
-                    },
-                  })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Source videos longer than this are split into chunks; default
-                  is 60 seconds.
-                </p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="source-video">Source video</Label>
-                <Input
-                  id="source-video"
-                  type="file"
-                  accept="video/*"
-                  {...register("sourceVideo", {
-                    required:
-                      "Choose a source video before creating a collection.",
-                  })}
-                />
-              </div>
-              <Button
-                type="submit"
-                size="lg"
-                disabled={createAndUploadMutation.isPending}
-              >
-                {createAndUploadMutation.isPending && (
-                  <Loader2 className="animate-spin" />
-                )}
-                {createAndUploadMutation.isPending
-                  ? "Creating and uploading…"
-                  : "Create collection and upload video"}
-              </Button>
             </form>
           </CardContent>
         </Card>
-      </section>
 
-      {job && <JobStatusCard job={job} />}
+        {job && (
+          <div className="xl:sticky xl:top-6 xl:self-start">
+            <JobStatusCard job={job} />
+          </div>
+        )}
+      </section>
     </>
   );
 }
