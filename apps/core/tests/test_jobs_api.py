@@ -165,6 +165,7 @@ def test_create_job_accepts_translation_context() -> None:
             json={
                 "source_language": "zh",
                 "target_language": "vi",
+                "model_name": "large-v3",
                 "translation_context": "martial arts comedy",
                 "voice_id": "voice-one",
                 "output_video_speed": 1.25,
@@ -175,6 +176,7 @@ def test_create_job_accepts_translation_context() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 201
+    assert response.json()["model_name"] == "large-v3"
     assert response.json()["translation_context"] == "martial arts comedy"
     assert response.json()["voice_id"] == "voice-one"
     assert response.json()["output_video_speed"] == 1.25
@@ -201,6 +203,7 @@ def test_create_job_rejects_translation_context_over_100_characters() -> None:
             json={
                 "source_language": "zh",
                 "target_language": "vi",
+                "model_name": "large-v3",
                 "translation_context": "x" * 101,
             },
         )

@@ -9,6 +9,7 @@ function job(overrides: Partial<Job>): Job {
     external_job_id: "job_1",
     source_language: "zh",
     target_language: "vi",
+    model_name: "medium",
     translation_context: null,
     voice_id: null,
     output_video_speed: 1,
