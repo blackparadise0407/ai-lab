@@ -11,6 +11,7 @@ from app.models.entities import (  # noqa: F401
     Job,
     ProviderRequest,
     VideoCollection,
+    VideoCollectionRender,
     VideoSegment,
 )
 
@@ -30,6 +31,10 @@ def _ensure_sqlite_columns() -> None:
         for table_name in inspector.get_table_names()
     }
     alter_statements = []
+    if "job" in table_columns and "model_name" not in table_columns["job"]:
+        alter_statements.append(
+            "ALTER TABLE job ADD COLUMN model_name VARCHAR(32) NOT NULL DEFAULT 'medium'"
+        )
     if "job" in table_columns and "translation_context" not in table_columns["job"]:
         alter_statements.append(
             "ALTER TABLE job ADD COLUMN translation_context VARCHAR(100)"
@@ -43,6 +48,13 @@ def _ensure_sqlite_columns() -> None:
     if "job" in table_columns and "original_audio_volume" not in table_columns["job"]:
         alter_statements.append(
             "ALTER TABLE job ADD COLUMN original_audio_volume FLOAT NOT NULL DEFAULT 0.15"
+        )
+    if (
+        "videocollection" in table_columns
+        and "model_name" not in table_columns["videocollection"]
+    ):
+        alter_statements.append(
+            "ALTER TABLE videocollection ADD COLUMN model_name VARCHAR(32) NOT NULL DEFAULT 'medium'"
         )
     if (
         "videocollection" in table_columns

@@ -9,6 +9,7 @@ from app.models.entities import (
     Job,
     ProviderRequest,
     VideoCollection,
+    VideoCollectionRender,
     VideoSegment,
 )
 from app.services.video_collections import refresh_collection_rollup
@@ -57,13 +58,34 @@ def delete_collection_and_artifacts(
     )
     job_ids = [segment.job_id for segment in segments]
     artifact_paths = _artifact_paths_for_jobs(session, job_ids)
+    renders = list(_renders_for_collection(session, collection.id))
+    render_paths = _render_paths(renders)
 
+    for render in renders:
+        session.delete(render)
     session.delete(collection)
     for job_id in job_ids:
         _delete_job_records(session, job_id)
     session.commit()
 
-    _delete_local_files(artifact_paths)
+    _delete_local_files(artifact_paths + render_paths)
+
+
+def _renders_for_collection(session: Session, collection_id: int):
+    return session.exec(
+        select(VideoCollectionRender).where(
+            VideoCollectionRender.collection_id == collection_id
+        )
+    ).all()
+
+
+def _render_paths(renders) -> list[Path]:
+    paths: list[Path] = []
+    for render in renders:
+        if not render.output_path or render.output_path.startswith(("http://", "https://")):
+            continue
+        paths.append(Path(render.output_path))
+    return paths
 
 
 def _delete_job_records(session: Session, job_id: int) -> None:

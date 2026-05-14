@@ -15,6 +15,7 @@ import {
   retryJob,
 } from "../../services/api";
 import { subscribeToJobEvents } from "../../services/jobEvents";
+import { Confirm } from "../common/Confirm";
 import { EmptyState } from "../common/EmptyState";
 import { PageHeader } from "../common/PageHeader";
 import { Button, buttonVariants } from "../ui/button";
@@ -156,13 +157,7 @@ export default function JobDetailPage() {
 
   function handleCancelJob() {
     if (!job || !cancelableStatuses.has(job.status)) return;
-    if (
-      window.confirm(
-        "Cancel this job? Partial intermediate artifacts may remain available for retry diagnostics.",
-      )
-    ) {
-      cancelJobMutation.mutate(job.id);
-    }
+    cancelJobMutation.mutate(job.id);
   }
 
   return (
@@ -173,7 +168,7 @@ export default function JobDetailPage() {
         description="Inspect pipeline status, generated artifacts, provider callbacks, and operational controls for one dubbing job."
       />
 
-      <Card className="mt-8 mb-6 bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="mt-8 mb-6 bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -224,19 +219,25 @@ export default function JobDetailPage() {
                 </Button>
               )}
               {job && cancelableStatuses.has(job.status) && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={handleCancelJob}
-                  disabled={cancelJobMutation.isPending}
+                <Confirm
+                  title="Cancel job?"
+                  description="Cancel this job? Partial intermediate artifacts may remain available for retry diagnostics."
+                  confirmLabel="Confirm"
+                  onConfirm={handleCancelJob}
                 >
-                  {cancelJobMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Ban />
-                  )}
-                  {cancelJobMutation.isPending ? "Canceling…" : "Cancel"}
-                </Button>
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    disabled={cancelJobMutation.isPending}
+                  >
+                    {cancelJobMutation.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Ban />
+                    )}
+                    {cancelJobMutation.isPending ? "Canceling…" : "Cancel"}
+                  </Button>
+                </Confirm>
               )}
               {job?.status === "completed" && (
                 <Link

@@ -1,12 +1,20 @@
 export type JobStatus =
-  | 'created'
-  | 'uploaded'
-  | 'processing'
-  | 'waiting_provider'
-  | 'finalizing'
-  | 'completed'
-  | 'failed'
-  | 'canceled';
+  | "created"
+  | "uploaded"
+  | "processing"
+  | "waiting_provider"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export type WhisperModelName =
+  | "tiny"
+  | "base"
+  | "small"
+  | "medium"
+  | "large-v3"
+  | "turbo";
 
 export interface JobListResponse {
   items: Job[];
@@ -20,6 +28,7 @@ export interface Job {
   external_job_id: string;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
@@ -55,7 +64,7 @@ export interface ProviderRequest {
   updated_at: string;
 }
 
-export type UploadPlatform = 'youtube' | 'facebook' | 'tiktok';
+export type UploadPlatform = "youtube" | "facebook" | "tiktok";
 
 export interface ConnectedAccount {
   id: number;
@@ -87,6 +96,12 @@ export interface PublishUploadResponse {
 export interface JobEventPayload {
   event: string;
   job?: Job;
+  items?: Job[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  status?: JobStatus;
+  updated_at?: string;
   artifacts?: Artifact[];
   provider_requests?: ProviderRequest[];
   job_id?: number;
@@ -125,6 +140,7 @@ export interface VideoCollection {
   original_filename?: string | null;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed: number;
@@ -138,6 +154,32 @@ export interface VideoCollection {
   progress_percent: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface VideoCollectionRender {
+  id: number;
+  collection_id: number;
+  status: JobStatus;
+  current_step: string;
+  progress_percent: number;
+  included_segment_ids: number[];
+  output_path?: string | null;
+  content_type: string;
+  duration_seconds?: number | null;
+  error_message?: string | null;
+  published_platform?: string | null;
+  provider_request_id?: string | null;
+  remote_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoCollectionRenderListResponse {
+  items: VideoCollectionRender[];
+}
+
+export interface VideoCollectionRenderCreateRequest {
+  segment_ids?: number[];
 }
 
 export interface VideoCollectionDetail extends VideoCollection {
@@ -155,6 +197,7 @@ export interface VideoCollectionCreateRequest {
   title?: string | null;
   source_language: string;
   target_language: string;
+  model_name: WhisperModelName;
   translation_context?: string | null;
   voice_id?: string | null;
   output_video_speed?: number;

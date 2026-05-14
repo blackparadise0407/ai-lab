@@ -106,7 +106,7 @@ export default function JobsPage() {
         description="Browse dubbing jobs by newest created time, then narrow the list by status, language pair, or current pipeline step."
       />
 
-      <Card className="mt-8 bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="mt-8 bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -187,7 +187,7 @@ export default function JobsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mt-6 bg-white/90 shadow-xl shadow-slate-900/5">
+      <Card className="mt-6 bg-card/90 shadow-xl shadow-slate-900/5">
         <CardHeader>
           <div>
             <CardDescription className="font-black uppercase tracking-[0.18em] text-primary">
@@ -229,9 +229,9 @@ export default function JobsPage() {
                 </thead>
                 <tbody className="divide-y">
                   {jobs.map((job) => (
-                    <tr key={job.id} className="align-top hover:bg-slate-50">
+                    <tr key={job.id} className="align-top hover:bg-muted/60">
                       <td className="px-4 py-4">
-                        <div className="font-black text-slate-950">#{job.id}</div>
+                        <div className="font-black text-foreground">#{job.id}</div>
                         <div className="mt-1 max-w-48 truncate text-xs text-muted-foreground">
                           {job.external_job_id}
                         </div>

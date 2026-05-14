@@ -1,4 +1,22 @@
-import type { Artifact, ConnectedAccount, DubVoiceListResponse, Job, JobListResponse, ProviderRequest, PublishUploadRequest, PublishUploadResponse, VideoCollection, VideoCollectionCreateRequest, VideoCollectionDetail, VideoCollectionListResponse, VideoSegment } from '../interfaces/job';
+import type {
+  Artifact,
+  ConnectedAccount,
+  DubVoiceListResponse,
+  Job,
+  JobListResponse,
+  ProviderRequest,
+  PublishUploadRequest,
+  PublishUploadResponse,
+  VideoCollection,
+  VideoCollectionCreateRequest,
+  VideoCollectionDetail,
+  VideoCollectionListResponse,
+  VideoCollectionRender,
+  VideoCollectionRenderCreateRequest,
+  VideoCollectionRenderListResponse,
+  VideoSegment,
+  WhisperModelName,
+} from '../interfaces/job';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:8000';
 
@@ -36,6 +54,7 @@ async function getResponseErrorMessage(response: Response) {
 export async function createJob(
   sourceLanguage: string,
   targetLanguage: string,
+  modelName: WhisperModelName = 'medium',
   voiceId?: string | null,
   outputVideoSpeed = 1,
   originalAudioVolume = 0.15,
@@ -47,6 +66,7 @@ export async function createJob(
     body: JSON.stringify({
       source_language: sourceLanguage,
       target_language: targetLanguage,
+      model_name: modelName,
       translation_context: translationContext || null,
       voice_id: voiceId || null,
       output_video_speed: outputVideoSpeed,
@@ -263,4 +283,40 @@ export function getArtifactPreviewUrl(artifact: Artifact) {
   }
 
   return `${apiBaseUrl}/v1/artifacts/${artifact.id}/preview`;
+}
+
+
+export async function getVideoCollectionRenders(collectionId: number) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/renders`);
+  return parseJsonResponse<VideoCollectionRenderListResponse>(response);
+}
+
+export async function createVideoCollectionRender(
+  collectionId: number,
+  payload: VideoCollectionRenderCreateRequest = {},
+) {
+  const response = await fetch(`${apiBaseUrl}/v1/video-collections/${collectionId}/renders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  return parseJsonResponse<VideoCollectionRender>(response);
+}
+
+export async function publishVideoCollectionRender(
+  collectionId: number,
+  renderId: number,
+  payload: PublishUploadRequest,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/v1/video-collections/${collectionId}/renders/${renderId}/uploads`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return parseJsonResponse<VideoCollectionRender>(response);
 }

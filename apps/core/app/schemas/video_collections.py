@@ -4,13 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.entities import JobStatus
-from app.schemas.jobs import JobResponse
+from app.schemas.jobs import JobResponse, WhisperModelName
 
 
 class VideoCollectionCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", min_length=2, max_length=8)
     target_language: str = Field(default="vi", min_length=2, max_length=8)
+    model_name: WhisperModelName = "medium"
     translation_context: Optional[str] = Field(default=None, max_length=100)
     voice_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     output_video_speed: float = Field(default=1.0, gt=0, le=4)
@@ -33,6 +34,7 @@ class VideoCollectionResponse(BaseModel):
     original_filename: Optional[str] = None
     source_language: str
     target_language: str
+    model_name: str
     translation_context: Optional[str] = None
     voice_id: Optional[str] = None
     output_video_speed: float
@@ -72,6 +74,40 @@ class VideoSegmentResponse(BaseModel):
     job: Optional[JobResponse] = None
     source_artifact: Optional[VideoSegmentArtifactResponse] = None
     processed_artifact: Optional[VideoSegmentArtifactResponse] = None
+
+
+class VideoCollectionRenderCreateRequest(BaseModel):
+    segment_ids: list[int] = Field(default_factory=list)
+
+
+class VideoCollectionRenderPublishRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+    privacy: str = Field(default="private", max_length=32)
+    connected_account_id: Optional[int] = None
+
+
+class VideoCollectionRenderResponse(BaseModel):
+    id: int
+    collection_id: int
+    status: JobStatus
+    current_step: str
+    progress_percent: int
+    included_segment_ids: list[int] = Field(default_factory=list)
+    output_path: Optional[str] = None
+    content_type: str
+    duration_seconds: Optional[float] = None
+    error_message: Optional[str] = None
+    published_platform: Optional[str] = None
+    provider_request_id: Optional[str] = None
+    remote_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VideoCollectionRenderListResponse(BaseModel):
+    items: list[VideoCollectionRenderResponse]
 
 
 class VideoCollectionDetailResponse(VideoCollectionResponse):

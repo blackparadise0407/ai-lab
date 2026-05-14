@@ -13,6 +13,7 @@ class VideoCollection(SQLModel, table=True):
     original_filename: Optional[str] = Field(default=None, max_length=255)
     source_language: str = Field(default="zh", max_length=8)
     target_language: str = Field(default="vi", max_length=8)
+    model_name: str = Field(default="medium", max_length=32)
     translation_context: Optional[str] = Field(default=None, max_length=100)
     voice_id: Optional[str] = Field(default=None, max_length=128)
     output_video_speed: float = Field(default=1.0, gt=0, le=4)

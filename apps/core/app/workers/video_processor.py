@@ -106,7 +106,9 @@ class VideoProcessingWorker:
             job = session.exec(select(Job).where(Job.id == job_id)).first()
             if not job or job.status not in (JobStatus.UPLOADED, JobStatus.PROCESSING):
                 return
+            source_language = job.source_language
             target_language = job.target_language
+            model_name = job.model_name
             translation_context = job.translation_context
             voice_id = job.voice_id
             output_video_speed = job.output_video_speed
@@ -171,7 +173,10 @@ class VideoProcessingWorker:
             self._update_job(job_id, "transcribing_source", 25)
             self._raise_if_canceled(job_id)
             source_transcript = self._transcribe_audio(
-                source_audio_path, language=job.source_language, word_timestamps=False
+                source_audio_path,
+                language=source_language,
+                model_name=model_name,
+                word_timestamps=False,
             )
             self._raise_if_canceled(job_id)
             source_transcript_path.write_text(
@@ -247,7 +252,10 @@ class VideoProcessingWorker:
             self._update_job(job_id, "transcribing_dub", 75)
             self._raise_if_canceled(job_id)
             dubbed_transcript = self._transcribe_audio(
-                tts_audio_path, language=target_language, word_timestamps=True
+                tts_audio_path,
+                language=target_language,
+                model_name=model_name,
+                word_timestamps=True,
             )
             self._raise_if_canceled(job_id)
             dubbed_transcript_path.write_text(
@@ -443,9 +451,9 @@ class VideoProcessingWorker:
         source_audio: Path,
         *,
         language: str | None = None,
+        model_name: str = "medium",
         word_timestamps: bool = False,
     ) -> dict[str, object]:
-        model_name = os.getenv("WHISPER_MODEL", "small")
         compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
         model = WhisperModel(model_name, compute_type=compute_type)
         transcribe_kwargs: dict[str, object] = {
